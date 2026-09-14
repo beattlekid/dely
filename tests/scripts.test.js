@@ -509,9 +509,13 @@ test("5 advance stops paging on a 0-row limited page", () => {
   });
   assert.equal(r.status, 6, r.stdout);
   assert.match(r.stdout, /STALLED ctx_idle/);
-  const reads = readLog(ctx.logPath).filter((argv) => argv[0] === "orchestration" && argv[1] === "worker-read");
+  const log = readLog(ctx.logPath);
+  const reads = log.filter((argv) => argv[0] === "orchestration" && argv[1] === "worker-read");
+  const cycles = log.filter((argv) => argv[0] === "orchestration" && argv[1] === "worker-list").length;
   assert.ok(reads.length > 0, "must read the open dispatch");
-  assert.ok(reads.length < 40, "0-row limited page must not page 20 times per cycle: " + reads.length);
+  assert.ok(cycles > 0, "must list workers each progress cycle");
+  const per = reads.length / cycles;
+  assert.ok(per <= 2, "reads per progress cycle must be ≤ 2, got " + per + " (" + reads.length + "/" + cycles + ")");
 });
 
 test("6 waiter names Control: wait --as records --terminal on check", () => {
@@ -745,17 +749,45 @@ test("flags() does not take a following --flag as a value", () => {
   }
 });
 
-test("8 notify retries without --enter then a bare CR when enter is blocked", () => {
-  const ctx = setup(DEFAULT_AGENTS, { coordinatorHandle: "term_new", sendEnterBlocked: true });
+test("8 notify retries --enter after a block clears and never sends without it", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    coordinatorHandle: "term_new",
+    sendEnterBlocked: true,
+    sendEnterBlockedUntil: 1,
+  });
   const outFile = path.join(ctx.repo, "wait.out");
-  const r = runDely(["notify", "--run", "run_1", "--as", "term_old", "--out", outFile], ctx);
+  const line = "dely wait finished for run_1. Finish your current step, then read " + outFile + " and continue.";
+  const r = runDely(["notify", "--run", "run_1", "--as", "term_old", "--out", outFile], ctx, {
+    DELY_NOTIFY_RETRY_S: "0.05",
+    DELY_NOTIFY_GIVEUP_S: "2",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const sends = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "send");
-  assert.equal(sends.length, 3, JSON.stringify(sends));
-  assert.ok(sends[0].includes("--enter"));
-  assert.ok(hasFlagPair(sends[0], "--text", "dely wait finished for run_1. Finish your current step, then read " + outFile + " and continue."));
-  assert.equal(sends[1].includes("--enter"), false);
-  assert.ok(hasFlagPair(sends[1], "--text", "dely wait finished for run_1. Finish your current step, then read " + outFile + " and continue."));
-  assert.equal(sends[2].includes("--enter"), false);
-  assert.ok(hasFlagPair(sends[2], "--text", "\r"));
+  const withoutEnter = sends.filter((argv) => !argv.includes("--enter"));
+  assert.equal(withoutEnter.length, 0, "must never send without --enter: " + JSON.stringify(sends));
+  assert.equal(
+    sends.some((argv) => hasFlagPair(argv, "--text", "\r")),
+    false,
+    "must never send a bare CR: " + JSON.stringify(sends)
+  );
+  const afterClear = sends.filter((argv) => argv.includes("--enter") && hasFlagPair(argv, "--text", line));
+  assert.equal(afterClear.length, 2, "one blocked --enter then one after clear: " + JSON.stringify(sends));
+});
+
+test("8 notify gives up on a lasting block and never sends without --enter", () => {
+  const ctx = setup(DEFAULT_AGENTS, { coordinatorHandle: "term_new", sendEnterBlocked: true });
+  const outFile = path.join(ctx.repo, "wait.out");
+  const r = runDely(["notify", "--run", "run_1", "--as", "term_old", "--out", outFile], ctx, {
+    DELY_NOTIFY_RETRY_S: "0.05",
+    DELY_NOTIFY_GIVEUP_S: "0.15",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.notEqual(r.status, 0, "give-up must exit non-zero: " + r.stderr + r.stdout);
+  const sends = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "send");
+  assert.ok(sends.length >= 1, JSON.stringify(sends));
+  for (const argv of sends) {
+    assert.ok(argv.includes("--enter"), "must never send without --enter: " + JSON.stringify(argv));
+    assert.equal(hasFlagPair(argv, "--text", "\r"), false, JSON.stringify(argv));
+  }
 });

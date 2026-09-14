@@ -328,8 +328,13 @@ if (group === "terminal" && cmd === "list") {
 
 if (group === "terminal" && cmd === "send") {
   if (flags.enter && scenario.sendEnterBlocked) {
-    saveState(state);
-    fail("agent_prompt_blocked");
+    const n = (state.sendEnterFails || 0) + 1;
+    const until = scenario.sendEnterBlockedUntil;
+    if (until == null || n <= until) {
+      state.sendEnterFails = n;
+      saveState(state);
+      fail("agent_prompt_blocked");
+    }
   }
   saveState(state);
   ok({ terminal: { handle: flags.terminal, sent: true } });

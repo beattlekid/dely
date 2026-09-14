@@ -9,6 +9,8 @@ const path = require("path");
 const ACK_S = Number(process.env.DELY_ACK_S || 60);
 const POLL_S = Number(process.env.DELY_POLL_S || 15);
 const PROGRESS_S = Number(process.env.DELY_PROGRESS_S || 60);
+const NOTIFY_RETRY_S = Number(process.env.DELY_NOTIFY_RETRY_S || 30);
+const NOTIFY_GIVEUP_S = Number(process.env.DELY_NOTIFY_GIVEUP_S || 1800);
 
 function orca(args) {
   const bin = process.env.ORCA_CLI_COMMAND || "orca";
@@ -401,12 +403,15 @@ function notify(f) {
   const run = (orca(["orchestration", "run-show", "--id", f.run]).result || {}).run || {};
   const to = run.coordinator_handle || f.as;
   const text = "dely wait finished for " + f.run + ". Finish your current step, then read " + f.out + " and continue.";
-  const send = (args) => orca(["terminal", "send", "--terminal", to, ...args]);
-  const r = send(["--text", text, "--enter"]);
-  const msg = (r.error && r.error.message) || "";
-  if (r.ok === false && /agent_prompt_blocked/.test(msg)) {
-    send(["--text", text]);
-    send(["--text", "\r"]);
+  const retryMs = Math.max(1, Math.floor(NOTIFY_RETRY_S * 1000));
+  const giveUpMs = NOTIFY_GIVEUP_S * 1000;
+  for (const t0 = Date.now(); ; ) {
+    const r = orca(["terminal", "send", "--terminal", to, "--text", text, "--enter"]);
+    if (r.ok !== false) return;
+    const msg = (r.error && r.error.message) || "";
+    if (!/agent_prompt_blocked/.test(msg)) return;
+    if (Date.now() - t0 >= giveUpMs) process.exit(1);
+    sleep(retryMs);
   }
 }
 
