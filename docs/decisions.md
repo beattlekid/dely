@@ -170,6 +170,10 @@ Claude and Codex only, and Codex cannot report from it.
     new preflight.
   - **Grok Build 1.0.30 asks a y/n security question in a fresh repository,** so its
     Setup cell is no longer `none`.
+  - **Residuals of this fix.** No test settles one dispatch's `worker_done` while the
+    adopt file records a different dispatch. The adopt file is rewritten without a lock,
+    so a concurrent record and settle can lose an entry. Losing one leaks a terminal and
+    never closes the wrong one.
 
 #### Non-goals
 
