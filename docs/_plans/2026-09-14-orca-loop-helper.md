@@ -46,10 +46,13 @@ Contract:
      prints `SETTLED` with the delivery id and the whole batch, unacknowledged,
      and exits 0.
    - **Other batches:** acknowledged, and the loop continues.
-   - **After each empty wait:** a `worker-list` row with
-     `projection.attention.requiresAction`, whose `dispatchStatus` is not
-     `dispatched` and whose id is not in `--skip`, prints `ATTENTION` with its
-     liveness and `nextAction`, and exits 8.
+   - **After each empty wait:** a `worker-list` row whose
+     `projection.nextAction.kind` is not `none` and whose id is not in `--skip`
+     prints `ATTENTION` with its liveness and `nextAction`, and exits 8.
+     **Amended by Control during task 1 review:** live Orca keeps
+     `attention.requiresAction: true` with `nextAction.kind: none` on completed
+     and released rows, so `requiresAction` and `dispatchStatus` do not decide
+     ATTENTION.
    - **Stall:** at most once a minute, it advances each open dispatch's
      `worker-read --source auto` cursor. No new rows for `--stall-min` (default
      10) prints `STALLED` with the last output and exits 6.
@@ -82,8 +85,8 @@ Contract:
 | 2 | ACK matches its own dispatch | test: a heartbeat from another dispatch is pending → `NO_ACK` and `worker-stop` | treats any heartbeat as the ACK | implementer |
 | 3 | settling batch left unacked | test: batch of heartbeat + worker_done → `SETTLED` with both, no `--ack` recorded | acks before printing | implementer |
 | 3 | non-settling batch acked | test: heartbeat-only batch then worker_done → one `--ack`, then `SETTLED` | never acks, so the batch replays forever | implementer |
-| 4 | ATTENTION on a failed row | test: row `dispatchStatus: failed`, `requiresAction: true` → `ATTENTION` exit 8 | requires `dispatchStatus: dispatched` (the Spike's own bug) | implementer |
-| 4 | no ATTENTION noise | test: row `dispatched` with `unverifiable` and `requiresAction: true` → keeps waiting; a skipped failed row → keeps waiting | reports every `requiresAction` row | implementer |
+| 4 | ATTENTION on an actionable row | test: row `dispatchStatus: failed`, `nextAction: {kind: release}` → `ATTENTION` exit 8 | requires `dispatchStatus: dispatched` (the Spike's own bug) | implementer |
+| 4 | no ATTENTION noise | test: a `completed` row and a `dispatched` `unverifiable` row, both `requiresAction: true` with `nextAction.kind: none` → keeps waiting; a skipped actionable row → keeps waiting | reports every `requiresAction` row | implementer |
 | 5 | STALLED | test: cursor unchanged past `--stall-min` → `STALLED` exit 6; cursor advancing → no STALLED | judges stall from liveness only (Orca said `live` for a stalled worker) | implementer |
 | 6 | waiter names Control | test: `wait --as term_x` records `--terminal term_x` on `check` | omits it (live Orca fences the check) | implementer |
 | 7 | one waiter | test: a second `wait-bg` with a fresh lock prints `ALREADY_WAITING` and records no `terminal create`; a stale lock starts one | no lock | implementer |
