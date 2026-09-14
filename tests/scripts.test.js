@@ -509,3 +509,18 @@ test("9 preflight reports a failing check instead of spinning", () => {
   assert.ok(log.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
   assert.ok(log.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_bb22")));
 });
+
+test("preflight without required flags prints usage and exits 2", () => {
+  const ctx = setup();
+  const bare = runDely(["preflight"], ctx);
+  assert.equal(bare.status, 2, bare.stderr + bare.stdout);
+  assert.match(bare.stdout, /^usage:/);
+  assert.equal(/ERR_INVALID_ARG_TYPE/.test(bare.stderr + bare.stdout), false);
+  assert.equal(/TypeError/.test(bare.stderr + bare.stdout), false);
+
+  const noRun = runDely(["preflight", "--repo", ctx.repo], ctx);
+  assert.equal(noRun.status, 2, noRun.stderr + noRun.stdout);
+  assert.match(noRun.stdout, /^usage:/);
+  assert.equal(/FAIL start:/.test(noRun.stdout), false);
+  assert.equal(readLog(ctx.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+});

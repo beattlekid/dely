@@ -153,9 +153,11 @@ Usage as the launcher prints it:
   dispatch ids from ATTENTION
 - `dely wait-bg --run <runId>` prints `WAITING` (exit 0),
   `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
-  (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`
-- `dely notify --run <runId>` types one line naming the output file and
-  `--enter` into the Run's current `coordinator_handle`
+  (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`.
+  It takes the same `--skip`, `--stall-min` and `--timeout-min` as `wait`.
+  The wake line names the output file to read
+- `dely notify --run <runId> --as <handle> --out <file>` types one line naming the output file and
+  `--enter` into the Run's current `coordinator_handle`, falling back to `--as`
 - unknown commands print `usage: dely preflight|dispatch|wait|wait-bg|notify`
   (exit 2)
 
@@ -184,9 +186,8 @@ before the first.** Control does not compose a worker launch or call
 `worker-start` by hand. The helper reads the pins from `AGENTS.md`. The
 helper appends the acknowledgement instruction. The `worker-start`
 receipt records `launch.requested` and `launch.effective`; it does not establish that the worker can serve
-the request or that it cannot. The
-runtime carries the execution plane's configured permission default onto
-composed argv and does not add a sandbox the project did not pin.
+the request or that it cannot. Orca applies the execution plane's configured permission default
+and does not add a sandbox the project did not pin.
 
 **Name the model and effort on every dispatch.** A worker left on a harness
 default is an unpinned environment: it lives in the harness's own config, it
@@ -205,6 +206,8 @@ identical to one that pinned the same value deliberately.
 
 **Result handling:**
 
+- **any `PREFLIGHT … FAIL` (exit 1):** do not dispatch to any pin; relay
+  the printed reason to the human.
 - **`SETTLED`:** process the batch, do the guide's completion accounting,
   and acknowledge.
 - **`ATTENTION`:** follow `nextAction` and skip that id next time.
@@ -403,6 +406,7 @@ from an ambiguous, missing, or merely transport-level outcome.
 | Scope or architecture must change | Return to the design gate |
 | New authority or destructive action is required | Ask the human |
 | Orca or a required capability is unavailable | Stop; no headless fallback |
+| any `PREFLIGHT … FAIL` (exit 1) | Do not dispatch to any pin; relay the printed reason to the human |
 | Harness fails or evidence is insufficient | Preserve the candidate, report the native outcome and role disposition |
 | Idempotent release step is interrupted | Verify Git and pull-request state, then resume |
 | `NO_ACK` or `FAILED` | One fresh `dely dispatch` with the same prompt file; a second failure on the same input goes to the human |

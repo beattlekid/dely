@@ -360,5 +360,14 @@ function notify(f) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify };
-if (table[cmd]) table[cmd](flags(rest));
-else out("usage: dely preflight|dispatch|wait|wait-bg|notify", 2);
+const need = {
+  preflight: ["repo", "run"],
+  dispatch: ["repo", "run", "phase", "spec-file"],
+  wait: ["run"],
+  "wait-bg": ["run"],
+  notify: ["run", "out"],
+};
+if (!table[cmd]) out("usage: dely preflight|dispatch|wait|wait-bg|notify", 2);
+const f = flags(rest);
+if (need[cmd].some((k) => !f[k])) out("usage: dely preflight|dispatch|wait|wait-bg|notify", 2);
+table[cmd](f);

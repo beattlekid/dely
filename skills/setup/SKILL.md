@@ -179,7 +179,10 @@ and never writes a harness store. The human closes the terminal when done.
 
 ## Preflight
 
-Then run `dely preflight`.
+Open a Run first as `orca skills get orchestration` describes. Then run
+`../delivery/scripts/dely preflight --repo <path> --run <runId>` relative
+to this skill. Any `PREFLIGHT … FAIL` (exit 1): do not dispatch to any pin;
+relay the printed reason to the human.
 
 ## What setup will not do
 
