@@ -148,7 +148,7 @@ Usage as the launcher prints it:
 - `dely wait --run <runId>` prints a JSON object with `SETTLED` (exit 0) or
   `ATTENTION` (exit 8), or
   `STALLED <dispatchId> <why>; liveness <json>; last output: <text>` (exit 6),
-  `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). `--timeout-min` (default 60)
+  `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). STALLED only for transcript workers (Claude Code, Codex CLI); terminal workers surface a stall at DEADLINE; the failure lines quote the worker's screen. `--timeout-min` (default 60)
   is the wait budget. `--as <handle>` passes
   `--terminal <handle>` on every consuming `check`. `--skip` omits those
   dispatch ids from ATTENTION

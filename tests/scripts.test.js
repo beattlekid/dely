@@ -55,6 +55,7 @@ function runDely(args, ctx, extraEnv) {
     HOME: ctx.home,
     DELY_POLL_S: extraEnv.DELY_POLL_S != null ? String(extraEnv.DELY_POLL_S) : "0.05",
     DELY_ACK_S: extraEnv.DELY_ACK_S != null ? String(extraEnv.DELY_ACK_S) : "1",
+    DELY_PREFLIGHT_S: extraEnv.DELY_PREFLIGHT_S != null ? String(extraEnv.DELY_PREFLIGHT_S) : "1",
     DELY_PROGRESS_S: extraEnv.DELY_PROGRESS_S != null ? String(extraEnv.DELY_PROGRESS_S) : "0",
   });
   delete env.SPAWN_TIMEOUT_MS;
@@ -790,6 +791,159 @@ test("8 notify gives up on a lasting block and never sends without --enter", () 
     assert.ok(argv.includes("--enter"), "must never send without --enter: " + JSON.stringify(argv));
     assert.equal(hasFlagPair(argv, "--text", "\r"), false, JSON.stringify(argv));
   }
+});
+
+const SIGNED_OUT = "You are currently not signed in";
+
+function lastOutput(stdout) {
+  const i = String(stdout).lastIndexOf("last output: ");
+  return i < 0 ? "" : String(stdout).slice(i + "last output: ".length);
+}
+
+function assertQuotedScreen(stdout, needle) {
+  const quoted = lastOutput(stdout);
+  assert.match(quoted, new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(/^\s*\{/.test(quoted), false, "must not quote Orca JSON: " + quoted);
+  assert.equal(/"tail"/.test(quoted), false, quoted);
+  assert.equal(/"transcript"/.test(quoted), false, quoted);
+  assert.equal(/"source"/.test(quoted), false, quoted);
+}
+
+function assertReadBeforeRelease(log, id) {
+  let lastRead = -1;
+  let firstRelease = -1;
+  log.forEach((argv, i) => {
+    if (argv[0] === "orchestration" && argv[1] === "worker-read" && hasFlagPair(argv, "--dispatch", id)) lastRead = i;
+    if (firstRelease < 0 && argv[0] === "orchestration" && argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", id)) {
+      firstRelease = i;
+    }
+  });
+  assert.ok(lastRead >= 0, "must worker-read " + id);
+  assert.ok(firstRelease >= 0, "must worker-release " + id);
+  assert.ok(lastRead < firstRelease, "worker-read after release returns nothing: read=" + lastRead + " release=" + firstRelease);
+}
+
+const signedOutStream = {
+  source: "stream",
+  terminal: {
+    tail: ["", SIGNED_OUT, ""],
+    latestCursor: "t0",
+    nextCursor: "t0",
+    returnedLineCount: 3,
+  },
+};
+
+test("failure text quotes terminal tail before release on PREFLIGHT FAIL and NO_ACK", () => {
+  const pf = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    workerRead: signedOutStream,
+  });
+  const pre = runDely(["preflight", "--repo", pf.repo, "--run", "run_1"], pf, {
+    DELY_ACK_S: "1",
+    DELY_PREFLIGHT_S: "1",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(pre.status, 1, pre.stdout);
+  assert.match(pre.stdout, /PREFLIGHT implement cursor FAIL /);
+  assert.match(pre.stdout, /PREFLIGHT review claude FAIL /);
+  assertQuotedScreen(pre.stdout, SIGNED_OUT);
+  const pfLog = readLog(pf.logPath);
+  assertReadBeforeRelease(pfLog, "ctx_aa11");
+  assertReadBeforeRelease(pfLog, "ctx_bb22");
+
+  const nack = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ffff") }],
+    workerRead: signedOutStream,
+  });
+  const r = runDely(
+    ["dispatch", "--repo", nack.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
+    nack,
+    { DELY_ACK_S: "1" }
+  );
+  assert.equal(r.status, 4, r.stdout);
+  assert.match(r.stdout, /NO_ACK ctx_ab12/);
+  assertQuotedScreen(r.stdout, SIGNED_OUT);
+  assertReadBeforeRelease(readLog(nack.logPath), "ctx_ab12");
+});
+
+test("5 STALLED only for transcript; terminal stream reaches DEADLINE however idle", () => {
+  const workers = [
+    {
+      dispatchId: "ctx_idle",
+      dispatchStatus: "dispatched",
+      projection: {
+        attention: { requiresAction: false },
+        liveness: { verdict: "live" },
+        nextAction: null,
+      },
+    },
+  ];
+  const movingStream = setup(DEFAULT_AGENTS, {
+    workers,
+    workerRead: { source: "stream", terminalAdvance: true, tail: [SIGNED_OUT] },
+  });
+  const moving = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], movingStream, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(moving.status, 7, moving.stdout);
+  assert.match(moving.stdout, /DEADLINE/);
+  assert.equal(/STALLED/.test(moving.stdout), false, "advancing terminal cursor must not stall");
+
+  const idleStream = setup(DEFAULT_AGENTS, {
+    workers,
+    workerRead: {
+      source: "stream",
+      terminal: {
+        tail: ["", SIGNED_OUT],
+        latestCursor: "t0",
+        nextCursor: "t0",
+        returnedLineCount: 2,
+      },
+    },
+  });
+  const idle = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], idleStream, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(idle.status, 7, idle.stdout);
+  assert.match(idle.stdout, /DEADLINE/);
+  assert.equal(/STALLED/.test(idle.stdout), false, "terminal-stream dispatch never yields STALLED");
+
+  const frozenTx = setup(DEFAULT_AGENTS, {
+    workers,
+    workerRead: {
+      source: "transcript",
+      nextCursor: "c0",
+      limited: false,
+      returnedMessageCount: 0,
+      messages: [{ text: SIGNED_OUT }],
+    },
+  });
+  const stalled = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], frozenTx, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(stalled.status, 6, stalled.stdout);
+  assert.match(stalled.stdout, /STALLED ctx_idle/);
+  assertQuotedScreen(stalled.stdout, SIGNED_OUT);
+});
+
+test("9 preflight worker_done budget uses DELY_PREFLIGHT_S not DELY_ACK_S", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    workerRead: signedOutStream,
+  });
+  const t0 = Date.now();
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {
+    DELY_ACK_S: "1",
+    DELY_PREFLIGHT_S: "2",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /no worker_done in 2s/);
+  assert.equal(/no worker_done in 1s/.test(r.stdout), false, r.stdout);
+  assert.ok(elapsed >= 1500, "must wait the preflight budget, not ACK_S: " + elapsed + "ms");
+  assertQuotedScreen(r.stdout, SIGNED_OUT);
 });
 
 test("8 notify falls back from a non-numeric retry interval and still gives up", () => {

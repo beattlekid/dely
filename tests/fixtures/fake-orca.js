@@ -170,6 +170,10 @@ if (group === "orchestration" && cmd === "worker-list") {
 
 if (group === "orchestration" && cmd === "worker-read") {
   const id = flags.dispatch || "";
+  if ((state.released || []).includes(id)) {
+    saveState(state);
+    ok({});
+  }
   const n = (state.readCount[id] || 0) + 1;
   state.readCount[id] = n;
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
@@ -177,32 +181,45 @@ if (group === "orchestration" && cmd === "worker-read") {
     saveState(state);
     fail(spec.error);
   }
-  if (spec.terminalAdvance) {
+  const term = spec.terminal || {};
+  const isStream = spec.source === "stream" || spec.terminalAdvance || spec.terminal;
+  if (isStream) {
+    const latest = spec.terminalAdvance ? "t" + n : term.latestCursor || spec.latestCursor || "t0";
+    const tail = term.tail || spec.tail || [];
     saveState(state);
     ok({
+      source: "stream",
       terminal: {
-        latestCursor: "t" + n,
-        limited: false,
-        returnedLineCount: 2,
+        tail,
+        latestCursor: latest,
+        nextCursor: term.nextCursor || spec.nextCursor || latest,
+        returnedLineCount:
+          term.returnedLineCount != null
+            ? term.returnedLineCount
+            : spec.returnedLineCount != null
+              ? spec.returnedLineCount
+              : tail.length || 2,
       },
     });
   }
   let transcript;
   if (spec.advance) {
     transcript = {
+      messages: spec.messages || [],
       nextCursor: "c" + n,
       limited: false,
       returnedMessageCount: n === 1 || flags.cursor ? 2 : 0,
     };
   } else {
     transcript = {
+      messages: spec.messages || [],
       nextCursor: spec.nextCursor || null,
       limited: Boolean(spec.limited),
       returnedMessageCount: spec.returnedMessageCount || 0,
     };
   }
   saveState(state);
-  ok({ transcript });
+  ok({ source: "transcript", transcript });
 }
 
 if (group === "orchestration" && cmd === "run-show") {

@@ -10,6 +10,7 @@ const ACK_S = Number(process.env.DELY_ACK_S || 60);
 const POLL_S = Number(process.env.DELY_POLL_S || 15);
 const PROGRESS_S = Number(process.env.DELY_PROGRESS_S || 60);
 const seconds = (v, d) => (Number.isFinite(+v) && +v > 0 ? +v : d);
+const PREFLIGHT_S = seconds(process.env.DELY_PREFLIGHT_S, 150);
 const NOTIFY_RETRY_S = seconds(process.env.DELY_NOTIFY_RETRY_S, 30);
 const NOTIFY_GIVEUP_S = seconds(process.env.DELY_NOTIFY_GIVEUP_S, 1800);
 
@@ -122,9 +123,34 @@ function namesDispatch(m, id) {
   return JSON.stringify(m).includes(id);
 }
 
+function clip(s) {
+  return String(s || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(-300);
+}
+
+function messageText(m) {
+  if (m == null) return "";
+  if (typeof m === "string") return m;
+  if (typeof m.text === "string") return m.text;
+  if (typeof m.content === "string") return m.content;
+  if (typeof m.body === "string") return m.body;
+  return "";
+}
+
 function lastText(id) {
   const r = orca(["orchestration", "worker-read", "--dispatch", id, "--source", "auto", "--limit", "200"]);
-  return JSON.stringify((r.result || {}).transcript || r.result || {}).replace(/\\n/g, " ").slice(-300);
+  const res = r.result || {};
+  if (res.terminal && Array.isArray(res.terminal.tail)) {
+    return clip(res.terminal.tail.filter((l) => String(l || "").trim()).join("\n"));
+  }
+  const msgs = (res.transcript && res.transcript.messages) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const t = messageText(msgs[i]);
+    if (String(t).trim()) return clip(t);
+  }
+  return "";
 }
 
 function preflight(f) {
@@ -150,7 +176,7 @@ function preflight(f) {
     } else open[s.id] = p;
   }
   const t0 = Date.now();
-  while (Object.keys(open).length && Date.now() - t0 < ACK_S * 1000) {
+  while (Object.keys(open).length && Date.now() - t0 < PREFLIGHT_S * 1000) {
     const r = orca([
       "orchestration",
       "check",
@@ -186,7 +212,7 @@ function preflight(f) {
     orca(["orchestration", "check", "--run", f.run, "--ack", res.deliveryId]);
   }
   for (const [id, p] of Object.entries(open)) {
-    out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL no worker_done in " + ACK_S + "s; last output: " + lastText(id));
+    out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id));
     orca(["orchestration", "worker-stop", "--dispatch", id]);
     orca(["orchestration", "worker-release", "--dispatch", id]);
     failed++;
@@ -225,6 +251,7 @@ function advance(track, id) {
       break;
     }
     const res = r.result || {};
+    if (res.source) t.source = res.source;
     const body = res.transcript || res.terminal || {};
     const cursor = body.latestCursor || body.nextCursor || null;
     const n = Number(body.returnedMessageCount || body.returnedLineCount || 0);
@@ -298,8 +325,9 @@ function wait(f) {
     lastProgressCheck = Date.now();
     for (const w of rows.filter((w) => w.dispatchStatus === "dispatched")) {
       const idle = advance(track, w.dispatchId);
+      const rec = track[w.dispatchId] || {};
+      if (!rec.error && rec.source === "stream") continue;
       if (idle >= stallMin) {
-        const rec = track[w.dispatchId] || {};
         const why = rec.error ? rec.error : "no new output for " + Math.floor(idle) + " min";
         out(
           "STALLED " +
