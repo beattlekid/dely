@@ -136,6 +136,11 @@ Claude and Codex only, and Codex cannot report from it.
     installs are verified by hash, not by version.
   - Cursor Agent CLI as a background Control and Grok Build as a waker Control rest on
     the 2026-09-14 Spike alone. Both failed as nudge-mode Controls on 2026-09-11.
+  - `notify` never types into Control while Orca reports `agent_prompt_blocked`, because
+    Orca raises that only while Control's TUI holds a permission or approval prompt,
+    and typed text and Return there could approve it. It retries `--enter` every 30 s
+    for up to 30 minutes, then leaves the result file unread. A Control whose prompt
+    stays unanswered that long is not woken.
 
 #### Non-goals
 
