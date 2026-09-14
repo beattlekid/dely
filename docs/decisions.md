@@ -131,6 +131,11 @@ Claude and Codex only, and Codex cannot report from it.
     one at a time.
   - Two phases sharing one pin print a single PREFLIGHT line, under the first phase.
   - The contracts rail against a `nudge` wake is lexical and case-sensitive.
+  - `0.18.0` now names different content from the 0.18.0 candidates installed for the
+    2026-09-13 probes. A plugin cache keyed by version can keep the old runtime, so
+    installs are verified by hash, not by version.
+  - Cursor Agent CLI as a background Control and Grok Build as a waker Control rest on
+    the 2026-09-14 Spike alone. Both failed as nudge-mode Controls on 2026-09-11.
 
 #### Non-goals
 
