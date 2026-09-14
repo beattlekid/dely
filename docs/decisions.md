@@ -136,6 +136,15 @@ Claude and Codex only, and Codex cannot report from it.
     installs are verified by hash, not by version.
   - Cursor Agent CLI as a background Control and Grok Build as a waker Control rest on
     the 2026-09-14 Spike alone. Both failed as nudge-mode Controls on 2026-09-11.
+  - `STALLED` covers only workers whose `worker-read` source is a hook-reported transcript
+    (Claude Code, Codex CLI). A terminal-stream cursor advanced about 940 bytes per 20 s
+    under an idle Cursor TUI, so for terminal-stream workers (Cursor, Copilot, Antigravity,
+    Grok) a stall surfaces only at `DEADLINE`, which Control treats as a checkpoint.
+  - A `PREFLIGHT … FAIL` or `NO_ACK` line quotes the worker's screen or last transcript
+    text read before the worker is stopped and released. Live, the earlier form printed
+    Orca's projection JSON and lost a flaky Cursor preflight's cause for good.
+  - Preflight waits about 150 s for each `worker_done`: a Cursor pin that passed one
+    preflight failed the next at the 90 s budget.
   - `notify` never types into Control while Orca reports `agent_prompt_blocked`, because
     Orca raises that only while Control's TUI holds a permission or approval prompt,
     and typed text and Return there could approve it. It retries `--enter` every 30 s
