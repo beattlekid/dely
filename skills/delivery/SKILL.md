@@ -125,27 +125,39 @@ rather than combining ownership.
 
 Orca is the required execution plane. It launches and supervises fresh native
 harness TUIs with the resolved harness, model, and effort. Orchestration is a
-required Orca capability. `dely:delivery` starts and preflights Orca before
-execution. It stops only when the CLI is missing, the runtime cannot start, or a
-required capability is absent — there is no direct dispatch and no headless
+required Orca capability. `dely:delivery` starts Orca, then Control loads
+`orca skills get orchestration` and follows its supervised loop. It stops
+only when the CLI is missing, the runtime cannot start, or a required
+capability is absent — there is no direct dispatch and no headless
 fallback of any kind.
 
 ### Launching a worker
 
-The launcher is `scripts/dely` relative to this skill. `--control` is the
-Orca agent id of Control's own harness. Control's wake mode is that
-harness's `Control wake` cell in `references/harnesses.md`.
+The launcher is `scripts/dely` relative to this skill. Control's wake mode is
+that harness's `Control wake` cell in `references/harnesses.md`.
 
 Usage as the launcher prints it:
 
-- `dely open --repo <path> --objective <text>` prints `RUN <runId>` (exit 0, 9 on error)
-- `dely dispatch --repo <path> --run <runId> --phase <implement|review> --spec-file <path> --control <agent>`
-- `dely wait --run <runId> --control <agent>` exits 3 `REFUSED` for a Control that is not in background mode
-- `dely collect --run <runId>`
-- `dely verify --repo <path> --control <agent>`
-
-Control opens the delivery Run with `dely open` before the first dispatch and
-never passes the verify Run.
+- `dely preflight --repo <path> --run <runId>` prints
+  `PREFLIGHT <phase> <agent> PASS <seconds>s` or
+  `PREFLIGHT <phase> <agent> FAIL <reason>` and exits 1 when any pin failed
+- `dely dispatch --repo <path> --run <runId> --phase <implement|review> --spec-file <path>`
+  prints `DISPATCHED <dispatchId>` (exit 0),
+  `NO_ACK <dispatchId> stopped after <s>s; last output: <text>` (exit 4), or
+  `FAILED <reason>` (exit 5)
+- `dely wait --run <runId>` prints a JSON object with `SETTLED` (exit 0) or
+  `ATTENTION` (exit 8), or
+  `STALLED <dispatchId> <why>; liveness <json>; last output: <text>` (exit 6),
+  `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). `--as <handle>` passes
+  `--terminal <handle>` on every consuming `check`. `--skip` omits those
+  dispatch ids from ATTENTION
+- `dely wait-bg --run <runId>` prints `WAITING` (exit 0),
+  `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
+  (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`
+- `dely notify --run <runId>` types one line naming the output file and
+  `--enter` into the Run's current `coordinator_handle`
+- unknown commands print `usage: dely preflight|dispatch|wait|wait-bg|notify`
+  (exit 2)
 
 `--spec-file` is the worktree-relative prompt file.
 
@@ -167,65 +179,40 @@ acceptance row — its instrument, its counterexample, and what was
 observed — the prompt carries that row as written rather than a
 restatement of it.
 
-**Every dispatch goes through `dely dispatch`.** Control does not compose a
-worker launch or call `worker-start` by hand. The runtime reads the pins
-from `AGENTS.md` and the launch path and model pin from the harness table.
-The runtime appends the acknowledgement instruction. The `worker-start`
+**Every dispatch goes through `dely dispatch`, with `dely preflight` once
+before the first.** Control does not compose a worker launch or call
+`worker-start` by hand. The helper reads the pins from `AGENTS.md`. The
+helper appends the acknowledgement instruction. The `worker-start`
 receipt records `launch.requested` and `launch.effective`; it does not establish that the worker can serve
-the request or that it cannot. The runtime carries the execution plane's
-configured permission default onto composed argv and does not add a
-sandbox the project did not pin.
+the request or that it cannot. The
+runtime carries the execution plane's configured permission default onto
+composed argv and does not add a sandbox the project did not pin.
 
 **Name the model and effort on every dispatch.** A worker left on a harness
 default is an unpinned environment: it lives in the harness's own config, it
 changes without announcing itself, and the dispatch that relies on it looks
 identical to one that pinned the same value deliberately.
 
-**Refusal:** when `dely dispatch` prints `REFUSED`, route by the text, with no
-human gate: a missing PASS verdict runs `dely:verify` at once, then dispatches
-again; `is not the Run bound to Control` or `is a verify Run` runs `dely open`
-and dispatches on the printed Run. On FAIL or BLOCKED, Control stops and relays
-the printed fix to the human. A second `REFUSED` right after a verify PASS goes
-to the human.
+**Never act on an Orca nudge.**
 
-**Sleep and wake after `DISPATCHED`, by wake mode:**
+**Sleep and wait after `DISPATCHED`, by wake mode:**
 
-- **background:** run `dely wait --run <run> --control <agent>` as a background command and
-  end the turn. `SETTLED` hands over the whole batch. `FAILED <dispatchId>
-  <reason>` is a dead dispatch: recover as below. `wait` consumes first,
-  then releases the dead dispatch and prints `FAILED`. If another dispatch
-  is still open, it keeps waiting for it. `NOTHING_OPEN exits 0` when the Run
-  has no open dispatch, including one already reported. After a `worker_done`,
-  `wait` and `collect` release that dispatch and close only terminals Dely
-  created for an adopted launch, never one a human took over; a batch holding
-  only `question` or `escalation` releases nothing.
-- **nudge:** after `DISPATCHED`, end the turn. On every Orca nudge, run only
-  `dely collect --run <run>`, never the `orca orchestration check`
-  command quoted in the nudge text, because it would consume the message.
-  On `WAITING`, end the turn again. On `FAILED <dispatchId> <reason>`,
-  recover as below. collect releases a dead dispatch before printing
-  `FAILED`, and never reports it twice. If a live dispatch remains, it also
-  prints `WAITING`: one fresh `dely dispatch`, then end the turn. Exit 2
-  when any dispatch remains open, even if a `FAILED` line was printed;
-  exit 8 when nothing is still open. A worker that neither
-  sends a message nor exits wakes nobody, so a Control that has heard
-  nothing for a long time asks the human.
+- **background:** run `dely wait --run <run>` as a background command and
+  end the turn.
+- **waker:** run `dely wait-bg --run <run>` as its last command, then end
+  the turn.
 - **unsupported:** that harness cannot be Control.
 
-Control acts on `SETTLED` lines whose dispatch id matches the one
-`DISPATCHED` printed, and on `FAILED` lines from `dely collect` or
-`dely wait`. After a `SETTLED` batch that holds only `question` or
-`escalation`, Control answers or escalates, then sleeps again by wake mode.
-`ERROR` (exit 9) goes to the human.
+**Result handling:**
 
-**Recovery:** `NO_ACK`, `SILENT` or `FAILED` is recovered by one fresh
-`dely dispatch` with the same prompt file. Never retry into the same terminal,
-and never reuse a settled terminal. A second failure on the same input goes
-to the human. `DEADLINE` goes to the human. `FAILED` from collect or wait is
-the same route: a dispatch Orca has marked failed that sent no settling
-message is released and reported once. A Control-stopped silent dispatch
-is not `FAILED`. Control acts on the `FAILED` line; exit 2 when any
-dispatch remains open, and exit 8 when nothing is still open.
+- **`SETTLED`:** process the batch, do the guide's completion accounting,
+  and acknowledge.
+- **`ATTENTION`:** follow `nextAction` and skip that id next time.
+- **`STALLED`:** read the output, then wait again or recover.
+- **`NO_ACK` or `FAILED`:** one fresh `dely dispatch` with the same prompt
+  file. Never retry into the same terminal, and never reuse a settled
+  terminal. A second failure on the same input goes to the human.
+- **`DEADLINE` and `ERROR`:** go to the human.
 
 The worker reports once with `worker_done` and an `--outcome`.
 Completion comes from the worker's own `worker_done`;
@@ -418,10 +405,11 @@ from an ambiguous, missing, or merely transport-level outcome.
 | Orca or a required capability is unavailable | Stop; no headless fallback |
 | Harness fails or evidence is insufficient | Preserve the candidate, report the native outcome and role disposition |
 | Idempotent release step is interrupted | Verify Git and pull-request state, then resume |
-| `NO_ACK`, `SILENT` or `FAILED` | One fresh `dely dispatch` with the same prompt file; a second failure on the same input goes to the human |
-| `FAILED <dispatchId> <reason>` from collect or wait | One fresh `dely dispatch` with the same prompt file; a second failure on the same input goes to the human. Exit 2 when any dispatch remains open; exit 8 when nothing is still open |
+| `NO_ACK` or `FAILED` | One fresh `dely dispatch` with the same prompt file; a second failure on the same input goes to the human |
+| `ATTENTION` | Follow `nextAction` and skip that id next time |
+| `STALLED` | Read the output, then wait again or recover |
 | `DEADLINE` | Ask the human |
-| `ERROR` (exit 9) | Ask the human |
+| `ERROR` | Ask the human |
 
 ## Changing this skill
 

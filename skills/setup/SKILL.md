@@ -177,9 +177,9 @@ table. The human answers that harness's own dialog; setup never answers it
 and never writes a harness store. The human closes the terminal when done.
 `Orca preflight` and `none` need no step.
 
-## Verify
+## Preflight
 
-Then run `dely:verify`.
+Then run `dely preflight`.
 
 ## What setup will not do
 

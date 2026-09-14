@@ -170,11 +170,11 @@ copilot plugin marketplace remove dely  # removes the marketplace, not the plugi
 ### Kiro CLI
 
 ```bash
-npx skills add hieuphung97/dely --agent kiro-cli --global --skill delivery --skill setup --skill verify
+npx skills add hieuphung97/dely --agent kiro-cli --global --skill delivery --skill setup
 
 npx skills list --agent kiro-cli --global    # verify it is installed
 npx skills update --global                   # update
-npx skills remove --agent kiro-cli --global --skill delivery --skill setup --skill verify  # uninstall
+npx skills remove --agent kiro-cli --global --skill delivery --skill setup  # uninstall
 ```
 
 `npx skills add` also writes `~/.agents/skills` (Codex and Copilot load it)
@@ -182,7 +182,7 @@ and `~/.kiro/skills`. Update or remove both copies. Compare
 `skills/delivery/SKILL.md` by hash with the installed file before assuming
 the plugin version is the one that runs.
 
-Invoke the skills in a Kiro CLI session as `/delivery`, `/setup` and `/verify`.
+Invoke the skills in a Kiro CLI session as `/delivery` and `/setup`.
 
 ### Checked versions
 
@@ -206,13 +206,14 @@ Ask for a change. Approve the design when asked. Dely implements, a
 different session reviews, then opens a PR. You merge. A Spike investigates
 only — no delivery run.
 
-`dely:verify` proves the dispatch path for this repository, these pins and
-this Control harness: a read-only preflight, one dispatch per distinct pin,
-and a PASS or FAIL verdict for that exact key. Delivery runs it automatically
-when `dely dispatch` prints `REFUSED` with no PASS verdict. When the text is
-`is not the Run bound to Control` or `is a verify Run`, run `dely open` and
-dispatch on the printed Run. It also runs at the end of `dely:setup`, and whenever a human
-asks after an account, harness or quota change.
+Control loads `orca skills get orchestration` and follows that supervised
+loop. `dely preflight` checks each distinct pin once before the first
+`dely dispatch`. After `DISPATCHED`, Control waits by the harness Control
+wake: `background` runs `dely wait`; `waker` runs `dely wait-bg` as its
+last command and ends the turn. It never acts on an Orca nudge. `SETTLED`
+hands over the batch; `ATTENTION` follows `nextAction`; `STALLED` is read
+then waited or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE`
+and `ERROR` go to the human.
 
 The workflow contract is [`skills/delivery/SKILL.md`](skills/delivery/SKILL.md).
 
