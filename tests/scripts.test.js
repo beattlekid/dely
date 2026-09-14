@@ -1484,3 +1484,175 @@ test("waitQuiet polls no more often than every 500 ms", () => {
     /* none */
   }
 });
+
+const AGY_ONLY = `# dely
+
+| Phase | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| \`implement\` | Antigravity CLI | default | default |
+| \`review\` | Antigravity CLI | default | default |
+`;
+
+const TRUST_GATE = "Do you trust the contents of this project?";
+
+function terminalReads(log) {
+  return log.filter((argv) => argv[0] === "terminal" && argv[1] === "read");
+}
+
+test("adopted start fails on a gate after quiet and never worker-start", () => {
+  function gated(agents) {
+    return setup(agents, {
+      terminalHandle: "term_agy",
+      terminalShow: { busyShows: 2 },
+      terminalRead: { tail: [TRUST_GATE] },
+      workerStarts: [{ dispatchId: "ctx_agy_gate" }],
+      workerRead: { error: { code: "worker_identity_changed" } },
+    });
+  }
+
+  const pfRun = "run_agy_gate_pf";
+  try {
+    fs.unlinkSync(adoptFile(pfRun));
+  } catch (_) {
+    /* none */
+  }
+  const pf = gated(AGY_ONLY);
+  const t0 = Date.now();
+  const pre = runDely(["preflight", "--repo", pf.repo, "--run", pfRun], pf, {
+    DELY_PREFLIGHT_S: "4",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  const pfMs = Date.now() - t0;
+  assert.equal(pre.status, 1, pre.stderr + pre.stdout);
+  assert.match(pre.stdout, /PREFLIGHT implement antigravity FAIL start: gate on screen:.*Do you trust the contents/);
+  assert.equal(/no worker_done/.test(pre.stdout), false, pre.stdout);
+  assert.ok(pfMs < 3000, "must fail in about the quiet time, not the 4s budget: " + pfMs + "ms");
+  const pfLog = readLog(pf.logPath);
+  assert.equal(startArgv(pfLog), undefined, "gated adopt must not worker-start: " + JSON.stringify(pfLog));
+  const pfReadIdx = pfLog.findIndex((argv) => argv[0] === "terminal" && argv[1] === "read");
+  assert.ok(pfReadIdx >= 0, "must terminal-read the adopted handle after quiet");
+  assert.ok(hasFlagPair(pfLog[pfReadIdx], "--terminal", "term_agy"), String(pfLog[pfReadIdx]));
+  const pfShowsBefore = pfLog.slice(0, pfReadIdx).filter((argv) => argv[0] === "terminal" && argv[1] === "show").length;
+  assert.ok(pfShowsBefore >= 2, "must wait for quiescence before the gate read: showsBefore=" + pfShowsBefore);
+  assert.ok(
+    closes(pfLog).some((argv) => hasFlagPair(argv, "--terminal", "term_agy")),
+    "must close the gated terminal"
+  );
+  assert.equal(fs.existsSync(adoptFile(pfRun)), false);
+
+  const nackRun = "run_agy_gate_dispatch";
+  try {
+    fs.unlinkSync(adoptFile(nackRun));
+  } catch (_) {
+    /* none */
+  }
+  const nack = gated(AGY_AGENTS);
+  const t1 = Date.now();
+  const r = runDely(
+    ["dispatch", "--repo", nack.repo, "--run", nackRun, "--phase", "implement", "--spec-file", "task.md"],
+    nack,
+    { DELY_ACK_S: "4", SPAWN_TIMEOUT_MS: 15000 }
+  );
+  const nackMs = Date.now() - t1;
+  assert.equal(r.status, 5, r.stderr + r.stdout);
+  assert.match(r.stdout, /^FAILED gate on screen:.*Do you trust the contents/m);
+  assert.equal(/NO_ACK/.test(r.stdout), false, r.stdout);
+  assert.ok(nackMs < 3000, "dispatch must fail in about the quiet time, not ACK_S: " + nackMs + "ms");
+  const nackLog = readLog(nack.logPath);
+  assert.equal(startArgv(nackLog), undefined, "gated dispatch must not worker-start: " + JSON.stringify(nackLog));
+  const nackReadIdx = nackLog.findIndex((argv) => argv[0] === "terminal" && argv[1] === "read");
+  assert.ok(nackReadIdx >= 0, "must terminal-read the adopted handle after quiet");
+  const nackShowsBefore = nackLog.slice(0, nackReadIdx).filter((argv) => argv[0] === "terminal" && argv[1] === "show").length;
+  assert.ok(nackShowsBefore >= 2, "must wait for quiescence before the gate read: showsBefore=" + nackShowsBefore);
+  assert.equal(fs.existsSync(adoptFile(nackRun)), false);
+});
+
+test("failed worker-list row drops early and quotes the created terminal when worker-read fails", () => {
+  function failedAgy(agents) {
+    return setup(agents, {
+      terminalHandle: "term_agy",
+      terminalShow: { busyShows: 2 },
+      terminalRead: { tail: [SIGNED_OUT] },
+      workerStarts: [{ dispatchId: "ctx_aa11" }],
+      workers: [
+        {
+          dispatchId: "ctx_aa11",
+          dispatchStatus: "failed",
+          projection: {
+            stage: { detail: "agent_readiness" },
+            attention: {},
+            liveness: {},
+            nextAction: null,
+          },
+        },
+      ],
+      workerRead: { error: { code: "worker_identity_changed" } },
+    });
+  }
+
+  const pfRun = "run_agy_failed_pf";
+  try {
+    fs.unlinkSync(adoptFile(pfRun));
+  } catch (_) {
+    /* none */
+  }
+  const pf = failedAgy(AGY_ONLY);
+  const t0 = Date.now();
+  const pre = runDely(["preflight", "--repo", pf.repo, "--run", pfRun], pf, {
+    DELY_PREFLIGHT_S: "4",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  const pfMs = Date.now() - t0;
+  assert.equal(pre.status, 1, pre.stderr + pre.stdout);
+  assert.match(
+    pre.stdout,
+    /PREFLIGHT implement antigravity FAIL worker failed: agent_readiness; last output:.*You are currently not signed in/
+  );
+  assert.equal(/no worker_done/.test(pre.stdout), false, pre.stdout);
+  assert.equal(/worker_identity_changed/.test(pre.stdout), false, "must not key the drop on worker-read: " + pre.stdout);
+  assert.ok(pfMs < 2500, "must drop well before the 4s budget: " + pfMs + "ms");
+  const pfLog = readLog(pf.logPath);
+  assert.ok(startArgv(pfLog), "worker-start must succeed so the failed row can appear");
+  assert.ok(
+    terminalReads(pfLog).some((argv) => hasFlagPair(argv, "--terminal", "term_agy")),
+    "quote must come from terminal read of the created handle"
+  );
+  assert.ok(pfLog.some((argv) => argv[1] === "worker-stop" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+  assert.ok(pfLog.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+  try {
+    fs.unlinkSync(adoptFile(pfRun));
+  } catch (_) {
+    /* none */
+  }
+
+  const nackRun = "run_agy_failed_dispatch";
+  try {
+    fs.unlinkSync(adoptFile(nackRun));
+  } catch (_) {
+    /* none */
+  }
+  const nack = failedAgy(AGY_AGENTS);
+  const t1 = Date.now();
+  const r = runDely(
+    ["dispatch", "--repo", nack.repo, "--run", nackRun, "--phase", "implement", "--spec-file", "task.md"],
+    nack,
+    { DELY_ACK_S: "4", SPAWN_TIMEOUT_MS: 15000 }
+  );
+  const nackMs = Date.now() - t1;
+  assert.equal(r.status, 4, r.stderr + r.stdout);
+  assert.match(r.stdout, /NO_ACK ctx_aa11 stopped after /);
+  assertQuotedScreen(r.stdout, SIGNED_OUT);
+  assert.equal(/worker_identity_changed/.test(r.stdout), false, r.stdout);
+  assert.ok(nackMs < 2500, "must stop ACK wait well before ACK_S: " + nackMs + "ms");
+  const nackLog = readLog(nack.logPath);
+  assert.ok(startArgv(nackLog), "dispatch worker-start must succeed");
+  assert.ok(
+    terminalReads(nackLog).some((argv) => hasFlagPair(argv, "--terminal", "term_agy")),
+    "NO_ACK quote must come from terminal read of the created handle"
+  );
+  try {
+    fs.unlinkSync(adoptFile(nackRun));
+  } catch (_) {
+    /* none */
+  }
+});

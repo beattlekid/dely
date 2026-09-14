@@ -148,6 +148,13 @@ function lastOutputAt(handle) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function terminalTail(handle) {
+  if (!handle) return [];
+  const r = orca(["terminal", "read", "--terminal", handle]);
+  const tail = r.result && r.result.terminal && r.result.terminal.tail;
+  return Array.isArray(tail) ? tail.filter((l) => String(l || "").trim()) : [];
+}
+
 function waitQuiet(handle, launchedAt) {
   const cap = launchedAt + QUIET_CAP_S * 1000;
   for (;;) {
@@ -250,6 +257,11 @@ function start(repo, run, p, spec, title) {
       closeCreated(createdHandle);
       return { error: "readiness timeout" };
     }
+    const launched = terminalTail(createdHandle);
+    if (hasGate(launched.join("\n"))) {
+      closeCreated(createdHandle);
+      return { error: "gate on screen: " + quote(launched.join("\n")) };
+    }
     args.push("--terminal", createdHandle);
   } else {
     args.push("--agent", p.agent);
@@ -320,8 +332,11 @@ function screenLines(id) {
   return [];
 }
 
-function lastText(id) {
-  return quote(screenLines(id).join("\n"));
+function lastText(id, handle) {
+  const lines = screenLines(id);
+  if (lines.length) return quote(lines.join("\n"));
+  if (handle) return quote(terminalTail(handle).join("\n"));
+  return quote("");
 }
 
 function preflight(f) {
@@ -354,6 +369,19 @@ function preflight(f) {
     closeCreated(rec.createdHandle);
     delete open[id];
     failed++;
+  };
+  const pollFailed = () => {
+    const rows = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []);
+    for (const [id, rec] of Object.entries(open)) {
+      const w = rows.find((x) => x.dispatchId === id);
+      if (!w || w.dispatchStatus !== "failed") continue;
+      const detail = ((w.projection || {}).stage || {}).detail || "failed";
+      drop(
+        id,
+        rec,
+        "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL worker failed: " + detail + "; last output: " + lastText(id, rec.createdHandle)
+      );
+    }
   };
   const pollGates = () => {
     for (const [id, rec] of Object.entries(open)) {
@@ -396,11 +424,12 @@ function preflight(f) {
       }
       orca(["orchestration", "check", "--run", f.run, "--ack", res.deliveryId]);
     }
+    pollFailed();
     pollGates();
     sleep(Math.max(1, Math.floor(POLL_S * 1000)));
   }
   for (const [id, rec] of Object.entries(open)) {
-    drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id));
+    drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id, rec.createdHandle));
   }
   process.exit(failed ? 1 : 0);
 }
@@ -418,8 +447,10 @@ function dispatch(f) {
   for (const t0 = Date.now(); Date.now() - t0 < ACK_S * 1000; sleep(interval)) {
     const peek = orca(["orchestration", "check", "--peek", "--run", f.run]);
     if (((peek.result || {}).messages || []).some((m) => namesDispatch(m, s.id))) out("DISPATCHED " + s.id, 0);
+    const row = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).find((w) => w.dispatchId === s.id);
+    if (row && row.dispatchStatus === "failed") break;
   }
-  const why = lastText(s.id);
+  const why = lastText(s.id, s.createdHandle);
   orca(["orchestration", "worker-stop", "--dispatch", s.id]);
   orca(["orchestration", "worker-release", "--dispatch", s.id]);
   takeAdopt(f.run, s.id);

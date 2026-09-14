@@ -163,6 +163,7 @@ if (group === "orchestration" && cmd === "worker-list") {
         attention: (w.projection && w.projection.attention) || {},
         liveness: (w.projection && w.projection.liveness) || {},
         nextAction: (w.projection && w.projection.nextAction) || null,
+        stage: (w.projection && w.projection.stage) || {},
       },
     })),
   });
@@ -178,6 +179,9 @@ if (group === "orchestration" && cmd === "worker-read") {
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
   if (spec.error) {
     saveState(state);
+    if (spec.error && typeof spec.error === "object") {
+      reply({ ok: false, error: spec.error }, 1);
+    }
     fail(spec.error);
   }
   const term = spec.terminal || {};
@@ -345,6 +349,17 @@ if (group === "orchestration" && cmd === "check") {
 if (group === "terminal" && cmd === "create") {
   saveState(state);
   ok({ terminal: { handle: scenario.terminalHandle || "term_w" } });
+}
+
+if (group === "terminal" && cmd === "read") {
+  const spec = scenario.terminalRead || {};
+  saveState(state);
+  ok({
+    terminal: {
+      handle: flags.terminal || scenario.terminalHandle || "term_w",
+      tail: spec.tail || [],
+    },
+  });
 }
 
 if (group === "terminal" && cmd === "show") {
