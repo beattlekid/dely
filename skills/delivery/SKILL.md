@@ -148,16 +148,19 @@ Usage as the launcher prints it:
 - `dely wait --run <runId>` prints a JSON object with `SETTLED` (exit 0) or
   `ATTENTION` (exit 8), or
   `STALLED <dispatchId> <why>; liveness <json>; last output: <text>` (exit 6),
-  `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). `--as <handle>` passes
+  `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). `--timeout-min` (default 60)
+  is the wait budget. `--as <handle>` passes
   `--terminal <handle>` on every consuming `check`. `--skip` omits those
   dispatch ids from ATTENTION
 - `dely wait-bg --run <runId>` prints `WAITING` (exit 0),
   `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
   (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`.
   It takes the same `--skip`, `--stall-min` and `--timeout-min` as `wait`.
-  The wake line names the output file to read
+  Default output and lock live under the OS temp directory keyed by run id,
+  not in the worktree. The wake line names the full path of the output file to read
 - `dely notify --run <runId> --as <handle> --out <file>` types one line naming the output file and
-  `--enter` into the Run's current `coordinator_handle`, falling back to `--as`
+  `--enter` into the Run's current `coordinator_handle`, falling back to `--as`.
+  If that send is blocked, it sends the same text without `--enter` and then a bare return
 - unknown commands print `usage: dely preflight|dispatch|wait|wait-bg|notify`
   (exit 2)
 
@@ -189,10 +192,15 @@ receipt records `launch.requested` and `launch.effective`; it does not establish
 the request or that it cannot. Orca applies the execution plane's configured permission default
 and does not add a sandbox the project did not pin.
 
-**Name the model and effort on every dispatch.** A worker left on a harness
-default is an unpinned environment: it lives in the harness's own config, it
-changes without announcing itself, and the dispatch that relies on it looks
-identical to one that pinned the same value deliberately.
+**Name the model and effort on every dispatch.** The helper honours
+`--model`/`--effort` only for Claude Code, Codex CLI and Cursor Agent CLI
+(and omits a `default` flag). A non-`default` Model on any other harness, or
+a non-`default` Effort with a `default` Model, fails closed and starts no
+worker: write `default` and set the model in Orca's agent default arguments.
+A worker left on a harness default is an unpinned environment: it lives in
+the harness's own config, it changes without announcing itself, and the
+dispatch that relies on it looks identical to one that pinned the same value
+deliberately.
 
 **Never act on an Orca nudge.**
 
@@ -215,7 +223,10 @@ identical to one that pinned the same value deliberately.
 - **`NO_ACK` or `FAILED`:** one fresh `dely dispatch` with the same prompt
   file. Never retry into the same terminal, and never reuse a settled
   terminal. A second failure on the same input goes to the human.
-- **`DEADLINE` and `ERROR`:** go to the human.
+- **`DEADLINE`:** a checkpoint. Check `worker-list` and the last output; if
+  the worker is progressing, wait again. A second `DEADLINE` with no
+  progress goes to the human.
+- **`ERROR`:** go to the human.
 
 The worker reports once with `worker_done` and an `--outcome`.
 Completion comes from the worker's own `worker_done`;
@@ -412,7 +423,7 @@ from an ambiguous, missing, or merely transport-level outcome.
 | `NO_ACK` or `FAILED` | One fresh `dely dispatch` with the same prompt file; a second failure on the same input goes to the human |
 | `ATTENTION` | Follow `nextAction` and skip that id next time |
 | `STALLED` | Read the output, then wait again or recover |
-| `DEADLINE` | Ask the human |
+| `DEADLINE` | Checkpoint: check worker-list and last output; wait again if the worker is progressing; a second DEADLINE with no progress goes to the human |
 | `ERROR` | Ask the human |
 
 ## Changing this skill

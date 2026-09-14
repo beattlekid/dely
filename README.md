@@ -198,7 +198,7 @@ against — observations, not a promised minimum:
 | Kiro CLI | 2.16.2 |
 | Cursor Agent CLI | 2026.08.25-3e8eec8 |
 | GitHub Copilot CLI | 1.0.83 |
-| Orca | 1.4.196 |
+| Orca | 1.4.200 |
 
 ## How Dely works
 
@@ -212,8 +212,10 @@ loop. `dely preflight` checks each distinct pin once before the first
 wake: `background` runs `dely wait`; `waker` runs `dely wait-bg` as its
 last command and ends the turn. It never acts on an Orca nudge. `SETTLED`
 hands over the batch; `ATTENTION` follows `nextAction`; `STALLED` is read
-then waited or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE`
-and `ERROR` go to the human.
+then waited or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE` is a
+checkpoint (`worker-list` and last output; wait again if progressing; a
+second `DEADLINE` with no progress goes to the human); `ERROR` goes to the
+human.
 
 The workflow contract is [`skills/delivery/SKILL.md`](skills/delivery/SKILL.md).
 

@@ -3,6 +3,7 @@
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const ACK_S = Number(process.env.DELY_ACK_S || 60);
@@ -34,8 +35,13 @@ function flags(argv) {
   const f = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith("--")) {
-      f[argv[i].slice(2)] = argv[i + 1];
-      i++;
+      const n = argv[i + 1];
+      if (n != null && !String(n).startsWith("--")) {
+        f[argv[i].slice(2)] = n;
+        i++;
+      } else {
+        f[argv[i].slice(2)] = true;
+      }
     }
   }
   return f;
@@ -65,6 +71,23 @@ const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
 };
+
+function pinWhy(p) {
+  const can = ["claude", "codex", "cursor"].includes(p.agent);
+  if (!can && p.model !== "default") {
+    return (
+      "pin " +
+      p.phase +
+      " " +
+      p.agent +
+      ": Orca cannot pin this model; write default and set the model in Orca's agent default arguments"
+    );
+  }
+  if (p.effort !== "default" && p.model === "default") {
+    return "pin " + p.phase + " " + p.agent + ": --effort requires --model";
+  }
+  return null;
+}
 
 function start(repo, run, p, spec, title) {
   const args = [
@@ -111,6 +134,12 @@ function preflight(f) {
   const open = {};
   let failed = 0;
   for (const p of uniq) {
+    const why = pinWhy(p);
+    if (why) {
+      out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL " + why);
+      failed++;
+      continue;
+    }
     const s = start(f.repo, f.run, p, spec, "preflight-" + p.phase);
     if (s.error) {
       out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL start: " + s.error);
@@ -164,6 +193,8 @@ function preflight(f) {
 
 function dispatch(f) {
   const p = pin(f.repo, f.phase);
+  const pinFail = pinWhy(p);
+  if (pinFail) out("FAILED " + pinFail, 5);
   const spec =
     fs.readFileSync(path.resolve(f.repo, f["spec-file"]), "utf8") +
     "\n\nFirst action, before anything else: send a heartbeat with subject `ack`.";
@@ -176,6 +207,7 @@ function dispatch(f) {
   }
   const why = lastText(s.id);
   orca(["orchestration", "worker-stop", "--dispatch", s.id]);
+  orca(["orchestration", "worker-release", "--dispatch", s.id]);
   out("NO_ACK " + s.id + " stopped after " + ACK_S + "s; last output: " + why, 4);
 }
 
@@ -192,9 +224,10 @@ function advance(track, id) {
     const res = r.result || {};
     const body = res.transcript || res.terminal || {};
     const cursor = body.latestCursor || body.nextCursor || null;
+    const n = Number(body.returnedMessageCount || body.returnedLineCount || 0);
     if (cursor && cursor !== t.cursor) t.at = Date.now();
     if (cursor) t.cursor = cursor;
-    if (!body.limited) break;
+    if (!body.limited || n === 0) break;
   }
   return (Date.now() - t.at) / 60000;
 }
@@ -285,16 +318,35 @@ function wait(f) {
 function waitBg(f) {
   const me = process.env.ORCA_TERMINAL_HANDLE;
   if (!me) out("ERROR not inside an Orca terminal", 9);
-  const file = path.resolve(f.out || ".dely-wait.out");
+  const file = path.resolve(f.out || path.join(os.tmpdir(), "dely-wait-" + f.run + ".out"));
   const lock = file + ".lock";
-  const staleMs = (Number(f["timeout-min"] || 60) + 5) * 60000;
+  const recorded = () => {
+    try {
+      const j = JSON.parse(fs.readFileSync(lock, "utf8"));
+      return (j && j.terminal) || "";
+    } catch (_) {
+      return "";
+    }
+  };
+  const live = (handle) => {
+    if (!handle) return false;
+    const terms = ((orca(["terminal", "list"]).result || {}).terminals || []);
+    return terms.some((t) => t && t.handle === handle);
+  };
+  const writeLock = (handle) => {
+    try {
+      fs.writeFileSync(lock, JSON.stringify({ terminal: handle || "" }));
+    } catch (_) {
+      /* vanished or unwritable */
+    }
+  };
   try {
-    fs.writeFileSync(lock, String(Date.now()), { flag: "wx" });
+    fs.writeFileSync(lock, JSON.stringify({ terminal: "" }), { flag: "wx" });
   } catch (_) {
-    if (Date.now() - Number(fs.readFileSync(lock, "utf8")) < staleMs) {
+    if (live(recorded())) {
       out("ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.", 0);
     }
-    fs.writeFileSync(lock, String(Date.now()));
+    writeLock("");
   }
   try {
     fs.unlinkSync(file);
@@ -305,7 +357,7 @@ function waitBg(f) {
   const self = q(__filename);
   const bin = q(process.execPath);
   const extra = ["skip", "stall-min", "timeout-min"]
-    .filter((k) => f[k])
+    .filter((k) => f[k] && f[k] !== true)
     .map((k) => " --" + k + " " + q(f[k]))
     .join("");
   const cmd =
@@ -341,21 +393,21 @@ function waitBg(f) {
     }
     out("ERROR " + ((r.error && r.error.message) || "terminal create failed"), 9);
   }
+  writeLock((r.result && r.result.terminal && r.result.terminal.handle) || "");
   out("WAITING", 0);
 }
 
 function notify(f) {
   const run = (orca(["orchestration", "run-show", "--id", f.run]).result || {}).run || {};
   const to = run.coordinator_handle || f.as;
-  orca([
-    "terminal",
-    "send",
-    "--terminal",
-    to,
-    "--text",
-    "dely wait finished for " + f.run + ". Finish your current step, then read " + f.out + " and continue.",
-    "--enter",
-  ]);
+  const text = "dely wait finished for " + f.run + ". Finish your current step, then read " + f.out + " and continue.";
+  const send = (args) => orca(["terminal", "send", "--terminal", to, ...args]);
+  const r = send(["--text", text, "--enter"]);
+  const msg = (r.error && r.error.message) || "";
+  if (r.ok === false && /agent_prompt_blocked/.test(msg)) {
+    send(["--text", text]);
+    send(["--text", "\r"]);
+  }
 }
 
 const [cmd, ...rest] = process.argv.slice(2);

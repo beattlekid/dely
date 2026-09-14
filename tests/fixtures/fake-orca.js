@@ -321,7 +321,16 @@ if (group === "terminal" && cmd === "create") {
   ok({ terminal: { handle: scenario.terminalHandle || "term_w" } });
 }
 
+if (group === "terminal" && cmd === "list") {
+  saveState(state);
+  ok({ terminals: scenario.terminals || [] });
+}
+
 if (group === "terminal" && cmd === "send") {
+  if (flags.enter && scenario.sendEnterBlocked) {
+    saveState(state);
+    fail("agent_prompt_blocked");
+  }
   saveState(state);
   ok({ terminal: { handle: flags.terminal, sent: true } });
 }

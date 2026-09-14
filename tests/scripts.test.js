@@ -102,12 +102,12 @@ function acks(log) {
   return checks(log).filter((argv) => argv.includes("--ack"));
 }
 
-test("1 pin argv: Copilot model has no --model; Claude default effort has no --effort", () => {
+test("1 pin argv: Copilot default omits flags; Claude default effort omits --effort", () => {
   const agents = `# dely
 
 | Phase | Harness | Model | Effort |
 | --- | --- | --- | --- |
-| \`implement\` | GitHub Copilot CLI | gpt-4.1 | high |
+| \`implement\` | GitHub Copilot CLI | default | default |
 | \`review\` | Claude Code | claude-opus-5 | default |
 `;
   const ctx = setup(agents, {
@@ -138,6 +138,80 @@ test("1 pin argv: Copilot model has no --model; Claude default effort has no --e
   assert.equal(claude.includes("--effort"), false, "Claude default effort omits --effort");
 });
 
+test("1 pin fail-closed: non-default model on Copilot starts no worker", () => {
+  const agents = `# dely
+
+| Phase | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| \`implement\` | GitHub Copilot CLI | gpt-4.1 | default |
+| \`review\` | Claude Code | claude-opus-5 | default |
+`;
+  const ctx = setup(agents, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ab12") }],
+  });
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
+    ctx
+  );
+  assert.equal(r.status, 5, r.stdout);
+  assert.match(
+    r.stdout,
+    /FAILED pin implement copilot: Orca cannot pin this model; write default and set the model in Orca's agent default arguments/
+  );
+  assert.equal(readLog(ctx.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+});
+
+test("1 pin fail-closed: effort without model starts no worker", () => {
+  const agents = `# dely
+
+| Phase | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| \`implement\` | Cursor Agent CLI | default | high |
+| \`review\` | Claude Code | default | medium |
+`;
+  const ctx = setup(agents, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ab12") }],
+  });
+  const impl = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
+    ctx
+  );
+  assert.equal(impl.status, 5, impl.stdout);
+  assert.match(impl.stdout, /FAILED pin implement cursor: --effort requires --model/);
+  assert.equal(readLog(ctx.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+
+  const pf = setup(agents, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+  });
+  const pre = runDely(["preflight", "--repo", pf.repo, "--run", "run_1"], pf);
+  assert.equal(pre.status, 1, pre.stdout);
+  assert.match(pre.stdout, /PREFLIGHT implement cursor FAIL pin implement cursor: --effort requires --model/);
+  assert.match(pre.stdout, /PREFLIGHT review claude FAIL pin review claude: --effort requires --model/);
+  assert.equal(readLog(pf.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+});
+
+test("1 preflight fail-closed: Copilot non-default model starts no worker", () => {
+  const agents = `# dely
+
+| Phase | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| \`implement\` | GitHub Copilot CLI | gpt-4.1 | high |
+| \`review\` | GitHub Copilot CLI | gpt-4.1 | default |
+`;
+  const ctx = setup(agents, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+  });
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(
+    r.stdout,
+    /PREFLIGHT implement copilot FAIL pin implement copilot: Orca cannot pin this model; write default and set the model in Orca's agent default arguments/
+  );
+  assert.equal(readLog(ctx.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+});
+
 test("2 ACK matches its own dispatch: foreign heartbeat is NO_ACK and worker-stop", () => {
   const ctx = setup(DEFAULT_AGENTS, {
     workerStarts: [{ dispatchId: "ctx_ab12" }],
@@ -154,6 +228,10 @@ test("2 ACK matches its own dispatch: foreign heartbeat is NO_ACK and worker-sto
   assert.ok(
     log.some((argv) => argv[0] === "orchestration" && argv[1] === "worker-stop" && hasFlagPair(argv, "--dispatch", "ctx_ab12"))
   );
+  assert.ok(
+    log.some((argv) => argv[0] === "orchestration" && argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_ab12")),
+    "NO_ACK must also worker-release"
+  );
 });
 
 test("3 settling batch left unacked", () => {
@@ -168,13 +246,47 @@ test("3 settling batch left unacked", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1"], ctx);
+  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /SETTLED/);
   assert.match(r.stdout, /dv_mix/);
   assert.match(r.stdout, /heartbeat/);
   assert.match(r.stdout, /worker_done/);
   assert.equal(acks(readLog(ctx.logPath)).length, 0, "settling batch must not be acked");
+});
+
+test("3 question-only batch SETTLED unacked", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_q",
+        messages: [{ type: "question", subject: "ask", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /SETTLED/);
+  assert.match(r.stdout, /dv_q/);
+  assert.match(r.stdout, /question/);
+  assert.equal(acks(readLog(ctx.logPath)).length, 0, "question batch must not be acked");
+});
+
+test("3 escalation-only batch SETTLED unacked", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_esc",
+        messages: [{ type: "escalation", subject: "blocked", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /SETTLED/);
+  assert.match(r.stdout, /dv_esc/);
+  assert.match(r.stdout, /escalation/);
+  assert.equal(acks(readLog(ctx.logPath)).length, 0, "escalation batch must not be acked");
 });
 
 test("3 non-settling batch acked then SETTLED", () => {
@@ -349,6 +461,59 @@ test("5 STALLED names worker-read error for an open dispatch", () => {
   assert.equal(/no new output/.test(r.stdout), false);
 });
 
+test("5 stall detection ignores non-dispatched rows", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workers: [
+      {
+        dispatchId: "ctx_done",
+        dispatchStatus: "completed",
+        projection: {
+          attention: { requiresAction: true },
+          liveness: { verdict: "exited" },
+          nextAction: { kind: "none", argv: [] },
+        },
+      },
+    ],
+    workerRead: { nextCursor: "c0", limited: false, returnedMessageCount: 0 },
+  });
+  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 7, r.stdout);
+  assert.match(r.stdout, /DEADLINE/);
+  assert.equal(/STALLED/.test(r.stdout), false, "completed rows must not stall");
+  assert.equal(
+    readLog(ctx.logPath).filter((argv) => argv[0] === "orchestration" && argv[1] === "worker-read").length,
+    0,
+    "must not worker-read a non-dispatched row"
+  );
+});
+
+test("5 advance stops paging on a 0-row limited page", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workers: [
+      {
+        dispatchId: "ctx_idle",
+        dispatchStatus: "dispatched",
+        projection: {
+          attention: { requiresAction: false },
+          liveness: { verdict: "live" },
+          nextAction: { kind: "none", argv: [] },
+        },
+      },
+    ],
+    workerRead: { nextCursor: "c0", limited: true, returnedMessageCount: 0 },
+  });
+  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.12"], ctx, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 6, r.stdout);
+  assert.match(r.stdout, /STALLED ctx_idle/);
+  const reads = readLog(ctx.logPath).filter((argv) => argv[0] === "orchestration" && argv[1] === "worker-read");
+  assert.ok(reads.length > 0, "must read the open dispatch");
+  assert.ok(reads.length < 40, "0-row limited page must not page 20 times per cycle: " + reads.length);
+});
+
 test("6 waiter names Control: wait --as records --terminal on check", () => {
   const ctx = setup(DEFAULT_AGENTS, {
     deliveries: [
@@ -367,47 +532,52 @@ test("6 waiter names Control: wait --as records --terminal on check", () => {
   }
 });
 
-test("7 one waiter: fresh lock is ALREADY_WAITING; stale lock starts a terminal; staleness follows --timeout-min", () => {
-  const ctx = setup(DEFAULT_AGENTS, {});
+test("7 one waiter: live recorded terminal is ALREADY_WAITING; missing terminal is stale", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    terminals: [{ handle: "term_w" }],
+    terminalHandle: "term_w",
+  });
   const outFile = path.join(ctx.repo, "wait.out");
   const lock = outFile + ".lock";
-  write(lock, String(Date.now()));
+  write(lock, JSON.stringify({ terminal: "term_w" }));
   const fresh = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(fresh.stdout, /ALREADY_WAITING/);
   const afterFresh = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create");
   assert.equal(afterFresh.length, 0);
+  assert.ok(
+    readLog(ctx.logPath).some((argv) => argv[0] === "terminal" && argv[1] === "list"),
+    "must consult terminal list"
+  );
 
-  fs.writeFileSync(lock, String(Date.now() - 66 * 60000));
-  const stale = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
+  const ctxDead = setup(DEFAULT_AGENTS, {
+    terminals: [{ handle: "term_other" }],
+    terminalHandle: "term_w",
+  });
+  const outDead = path.join(ctxDead.repo, "wait.out");
+  const lockDead = outDead + ".lock";
+  write(lockDead, JSON.stringify({ terminal: "term_dead" }));
+  const stale = runDely(["wait-bg", "--run", "run_1", "--out", outDead], ctxDead, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(stale.stdout, /^WAITING\b/m);
   assert.equal(/ALREADY_WAITING/.test(stale.stdout), false);
-  const created = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create");
+  const created = readLog(ctxDead.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create");
   assert.equal(created.length, 1);
+  assert.ok(fs.readFileSync(lockDead, "utf8").includes("term_w"), "lock must record the new waiter handle");
+});
 
-  const ctxLong = setup(DEFAULT_AGENTS, {});
-  const outLong = path.join(ctxLong.repo, "wait.out");
-  const lockLong = outLong + ".lock";
-  write(lockLong, String(Date.now() - 70 * 60000));
-  const held = runDely(["wait-bg", "--run", "run_1", "--out", outLong, "--timeout-min", "90"], ctxLong, {
+test("7 wait-bg records the created terminal handle in the lock", () => {
+  const ctx = setup(DEFAULT_AGENTS, { terminalHandle: "term_wait1" });
+  const outFile = path.join(ctx.repo, "wait.out");
+  const lock = outFile + ".lock";
+  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
-  assert.match(held.stdout, /ALREADY_WAITING/);
-  assert.equal(
-    readLog(ctxLong.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create").length,
-    0,
-    "70 min lock must still hold under --timeout-min 90"
-  );
-
-  write(lockLong, String(Date.now() - 96 * 60000));
-  const expired = runDely(["wait-bg", "--run", "run_1", "--out", outLong, "--timeout-min", "90"], ctxLong, {
-    ORCA_TERMINAL_HANDLE: "term_ctrl",
-  });
-  assert.match(expired.stdout, /^WAITING\b/m);
-  assert.equal(readLog(ctxLong.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create").length, 1);
+  assert.match(r.stdout, /^WAITING\b/m);
+  const body = JSON.parse(fs.readFileSync(lock, "utf8"));
+  assert.equal(body.terminal, "term_wait1");
 });
 
 test("7 wait-bg uses execPath and quotes run id, handle and skip", () => {
@@ -523,4 +693,69 @@ test("preflight without required flags prints usage and exits 2", () => {
   assert.match(noRun.stdout, /^usage:/);
   assert.equal(/FAIL start:/.test(noRun.stdout), false);
   assert.equal(readLog(ctx.logPath).filter((argv) => argv[1] === "worker-start").length, 0);
+});
+
+test("7 wait-bg default output lives under os.tmpdir keyed by run id", () => {
+  const ctx = setup(DEFAULT_AGENTS, { terminalHandle: "term_w" });
+  const r = runDely(["wait-bg", "--run", "run_xyz"], ctx, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(r.stdout, /^WAITING\b/m);
+  assert.equal(fs.existsSync(path.join(ctx.repo, ".dely-wait.out")), false);
+  assert.equal(fs.existsSync(path.join(ctx.repo, ".dely-wait.out.lock")), false);
+  const created = readLog(ctx.logPath).find((argv) => argv[0] === "terminal" && argv[1] === "create");
+  assert.ok(created, "terminal create recorded");
+  const cmd = created[created.indexOf("--command") + 1];
+  const expected = path.join(os.tmpdir(), "dely-wait-run_xyz.out");
+  assert.ok(cmd.includes(JSON.stringify(expected)), cmd);
+  assert.ok(cmd.includes("notify --run " + JSON.stringify("run_xyz")), cmd);
+  assert.ok(cmd.includes(" --out " + JSON.stringify(expected)), cmd);
+});
+
+test("7 wait-bg lock vanished between wx and read does not throw", () => {
+  const ctx = setup(DEFAULT_AGENTS, { terminalHandle: "term_w" });
+  const outFile = path.join(ctx.repo, "wait.out");
+  const lock = outFile + ".lock";
+  fs.mkdirSync(lock);
+  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.equal(/EISDIR/.test(r.stderr), false, r.stderr);
+  assert.equal(/ENOENT/.test(r.stderr), false, r.stderr);
+  assert.equal(/Error:/.test(r.stderr), false, r.stderr);
+  assert.match(r.stdout, /WAITING|ALREADY_WAITING|ERROR/);
+});
+
+test("flags() does not take a following --flag as a value", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const r = runDely(["wait", "--run", "run_1", "--skip", "--as", "term_x"], ctx);
+  assert.equal(r.status, 0, r.stdout);
+  const waitChecks = checks(readLog(ctx.logPath));
+  assert.ok(waitChecks.length);
+  for (const argv of waitChecks) {
+    assert.ok(hasFlagPair(argv, "--terminal", "term_x"), String(argv));
+    assert.equal(hasFlagPair(argv, "--terminal", "--skip"), false);
+  }
+});
+
+test("8 notify retries without --enter then a bare CR when enter is blocked", () => {
+  const ctx = setup(DEFAULT_AGENTS, { coordinatorHandle: "term_new", sendEnterBlocked: true });
+  const outFile = path.join(ctx.repo, "wait.out");
+  const r = runDely(["notify", "--run", "run_1", "--as", "term_old", "--out", outFile], ctx);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const sends = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "send");
+  assert.equal(sends.length, 3, JSON.stringify(sends));
+  assert.ok(sends[0].includes("--enter"));
+  assert.ok(hasFlagPair(sends[0], "--text", "dely wait finished for run_1. Finish your current step, then read " + outFile + " and continue."));
+  assert.equal(sends[1].includes("--enter"), false);
+  assert.ok(hasFlagPair(sends[1], "--text", "dely wait finished for run_1. Finish your current step, then read " + outFile + " and continue."));
+  assert.equal(sends[2].includes("--enter"), false);
+  assert.ok(hasFlagPair(sends[2], "--text", "\r"));
 });

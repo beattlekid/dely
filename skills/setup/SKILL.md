@@ -30,6 +30,8 @@ that harness's defaults for model and effort, written as the literal
 
 **Customize.** For each of `implement` and `review`, offer the discovered
 harnesses, models and effort levels and write what the human chooses.
+For Grok Build, Antigravity CLI, Kiro CLI and GitHub Copilot CLI, write the
+literal `default` for Model and Effort and point to Orca's agent default arguments.
 
 Ask which path. Do not start writing until that is answered.
 
@@ -71,25 +73,17 @@ no model turn. Do not treat them as a dispatch.
 Codex slugs with `visibility: hide` are not offered. Codex reasoning levels
 are `supported_reasoning_levels` on each slug, not one vocabulary per harness.
 
-Grok effort is not discovered by calling the model. Read the installed CLI's
-help and any validation already observed. Do not run a Grok prompt to learn
-the flag.
-
-Antigravity CLI effort is `low|medium|high`, read from `agy --help`'s
-`--effort` flag; do not prompt the model to learn it. Some model slugs already
-end in `-high`, `-medium`, or `-low` — that suffix names the model, not the
-effort flag, so do not strip it.
+For Grok Build, Antigravity CLI, Kiro CLI and GitHub Copilot CLI, write the
+literal `default` for Model and Effort. Point the human to Orca's agent default arguments to set the model. `grok models` and `agy models` list what
+that harness can run; do not write those slugs into the managed block.
 
 A harness that is not installed is omitted from the offer, not an error.
 
 ### Kiro CLI
 
-Kiro CLI models: `kiro-cli chat --list-models --format json` (offer each
-`model_id`). Kiro CLI effort is read from `kiro-cli chat --help`'s `--effort`
-flag; do not prompt the model to learn it and do not store a catalogue. Live
-discovery may offer only `auto` — that is a valid result, not a reason to
-invent model names. Omit Kiro discovery that is unavailable or unusable
-rather than guessing.
+Write the literal `default` for Model and Effort. Point the human to Orca's agent default arguments to set the model. Do not run `kiro-cli chat
+--list-models`, do not store a catalogue, and do not invent model names.
+Omit Kiro discovery that is unavailable or unusable rather than guessing.
 
 ### Cursor Agent CLI
 
@@ -101,12 +95,9 @@ is unavailable or unusable rather than guessing.
 
 ### GitHub Copilot CLI
 
-GitHub Copilot CLI models: there is no non-interactive listing. Write
-the literal `default` for Model; do not invent a catalogue, do not prompt
-the model to learn one, and do not treat `copilot -p "/model"` as
-discovery. GitHub Copilot CLI effort is read from `copilot --help`'s
-`--effort` flag. Omit Copilot discovery that is unavailable or unusable
-rather than guessing.
+Write the literal `default` for Model and Effort. Point the human to Orca's agent default arguments to set the model. Do not invent a catalogue, do not
+prompt the model to learn one, and do not treat `copilot -p "/model"` as
+discovery.
 
 ## Pinning
 
