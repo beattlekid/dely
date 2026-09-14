@@ -128,8 +128,21 @@ function preflight(f) {
       "--timeout-ms",
       String(Math.max(1, Math.floor(POLL_S * 1000))),
     ]);
+    if (r.ok === false) {
+      const why = (r.error && r.error.message) || "check failed";
+      for (const [id, p] of Object.entries(open)) {
+        out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL " + why);
+        orca(["orchestration", "worker-stop", "--dispatch", id]);
+        orca(["orchestration", "worker-release", "--dispatch", id]);
+        failed++;
+      }
+      process.exit(failed ? 1 : 0);
+    }
     const res = r.result || {};
-    if (!res.deliveryId) continue;
+    if (!res.deliveryId) {
+      sleep(Math.max(1, Math.floor(POLL_S * 1000)));
+      continue;
+    }
     for (const m of res.messages || []) {
       const hit = Object.keys(open).find((id) => m.type === "worker_done" && namesDispatch(m, id));
       if (hit) {
@@ -171,7 +184,12 @@ function advance(track, id) {
   for (let page = 0; page < 20; page++) {
     const args = ["orchestration", "worker-read", "--dispatch", id, "--source", "auto", "--limit", "200"];
     if (t.cursor) args.push("--cursor", t.cursor);
-    const res = orca(args).result || {};
+    const r = orca(args);
+    if (r.ok === false) {
+      t.error = (r.error && r.error.message) || "worker-read failed";
+      break;
+    }
+    const res = r.result || {};
     const body = res.transcript || res.terminal || {};
     const cursor = body.latestCursor || body.nextCursor || null;
     if (cursor && cursor !== t.cursor) t.at = Date.now();
@@ -224,9 +242,10 @@ function wait(f) {
     const rows = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).filter(
       (w) => !skip.includes(w.dispatchId)
     );
-    const act = rows.filter(
-      (w) => w.projection && (w.projection.attention || {}).requiresAction && w.dispatchStatus !== "dispatched"
-    );
+    const act = rows.filter((w) => {
+      const kind = ((w.projection || {}).nextAction || {}).kind;
+      return kind && kind !== "none";
+    });
     if (act.length) {
       out(
         {
@@ -244,12 +263,14 @@ function wait(f) {
     for (const w of rows.filter((w) => w.dispatchStatus === "dispatched")) {
       const idle = advance(track, w.dispatchId);
       if (idle >= stallMin) {
+        const rec = track[w.dispatchId] || {};
+        const why = rec.error ? rec.error : "no new output for " + Math.floor(idle) + " min";
         out(
           "STALLED " +
             w.dispatchId +
-            " no new output for " +
-            Math.floor(idle) +
-            " min; liveness " +
+            " " +
+            why +
+            "; liveness " +
             JSON.stringify((w.projection || {}).liveness) +
             "; last output: " +
             lastText(w.dispatchId),
@@ -266,10 +287,11 @@ function waitBg(f) {
   if (!me) out("ERROR not inside an Orca terminal", 9);
   const file = path.resolve(f.out || ".dely-wait.out");
   const lock = file + ".lock";
+  const staleMs = (Number(f["timeout-min"] || 60) + 5) * 60000;
   try {
     fs.writeFileSync(lock, String(Date.now()), { flag: "wx" });
   } catch (_) {
-    if (Date.now() - Number(fs.readFileSync(lock, "utf8")) < 65 * 60000) {
+    if (Date.now() - Number(fs.readFileSync(lock, "utf8")) < staleMs) {
       out("ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.", 0);
     }
     fs.writeFileSync(lock, String(Date.now()));
@@ -279,31 +301,36 @@ function waitBg(f) {
   } catch (_) {
     /* no prior output */
   }
-  const self = JSON.stringify(__filename);
+  const q = JSON.stringify;
+  const self = q(__filename);
+  const bin = q(process.execPath);
   const extra = ["skip", "stall-min", "timeout-min"]
     .filter((k) => f[k])
-    .map((k) => " --" + k + " " + f[k])
+    .map((k) => " --" + k + " " + q(f[k]))
     .join("");
   const cmd =
-    "node " +
+    bin +
+    " " +
     self +
     " wait --run " +
-    f.run +
+    q(f.run) +
     " --as " +
-    me +
+    q(me) +
     extra +
     " > " +
-    JSON.stringify(file) +
+    q(file) +
     " 2>&1; rm -f " +
-    JSON.stringify(lock) +
-    "; node " +
+    q(lock) +
+    "; " +
+    bin +
+    " " +
     self +
     " notify --run " +
-    f.run +
+    q(f.run) +
     " --as " +
-    me +
+    q(me) +
     " --out " +
-    JSON.stringify(file) +
+    q(file) +
     "; exit";
   const r = orca(["terminal", "create", "--worktree", "path:" + process.cwd(), "--title", "dely-wait", "--command", cmd]);
   if (r.ok === false) {

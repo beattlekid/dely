@@ -173,6 +173,10 @@ if (group === "orchestration" && cmd === "worker-read") {
   const n = (state.readCount[id] || 0) + 1;
   state.readCount[id] = n;
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
+  if (spec.error) {
+    saveState(state);
+    fail(spec.error);
+  }
   if (spec.terminalAdvance) {
     saveState(state);
     ok({

@@ -207,7 +207,7 @@ test("4 ATTENTION on a failed row", () => {
         projection: {
           attention: { requiresAction: true },
           liveness: { verdict: "exited" },
-          nextAction: { argv: ["orchestration", "worker-release", "--dispatch", "ctx_dead"] },
+          nextAction: { kind: "release", argv: ["orchestration", "worker-release", "--dispatch", "ctx_dead"] },
         },
       },
     ],
@@ -220,16 +220,25 @@ test("4 ATTENTION on a failed row", () => {
   assert.match(r.stdout, /worker-release/);
 });
 
-test("4 no ATTENTION noise: dispatched unverifiable and skipped failed keep waiting", () => {
+test("4 no ATTENTION noise: completed and dispatched unverifiable with nextAction none keep waiting", () => {
   const ctx = setup(DEFAULT_AGENTS, {
     workers: [
+      {
+        dispatchId: "ctx_done",
+        dispatchStatus: "completed",
+        projection: {
+          attention: { requiresAction: true },
+          liveness: { verdict: "unverifiable" },
+          nextAction: { kind: "none", argv: [] },
+        },
+      },
       {
         dispatchId: "ctx_live",
         dispatchStatus: "dispatched",
         projection: {
           attention: { requiresAction: true },
           liveness: { verdict: "unverifiable" },
-          nextAction: { argv: ["orchestration", "worker-show"] },
+          nextAction: { kind: "none", argv: [] },
         },
       },
       {
@@ -238,7 +247,7 @@ test("4 no ATTENTION noise: dispatched unverifiable and skipped failed keep wait
         projection: {
           attention: { requiresAction: true },
           liveness: { verdict: "exited" },
-          nextAction: { argv: ["orchestration", "worker-release"] },
+          nextAction: { kind: "release", argv: ["orchestration", "worker-release"] },
         },
       },
     ],
@@ -316,6 +325,30 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
   assert.equal(/STALLED/.test(term.stdout), false, "terminal latestCursor progress must not stall");
 });
 
+test("5 STALLED names worker-read error for an open dispatch", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workers: [
+      {
+        dispatchId: "ctx_idle",
+        dispatchStatus: "dispatched",
+        projection: {
+          attention: { requiresAction: false },
+          liveness: { verdict: "live" },
+          nextAction: { kind: "none", argv: [] },
+        },
+      },
+    ],
+    workerRead: { error: "worker_identity_changed" },
+  });
+  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 6, r.stdout);
+  assert.match(r.stdout, /STALLED ctx_idle/);
+  assert.match(r.stdout, /worker_identity_changed/);
+  assert.equal(/no new output/.test(r.stdout), false);
+});
+
 test("6 waiter names Control: wait --as records --terminal on check", () => {
   const ctx = setup(DEFAULT_AGENTS, {
     deliveries: [
@@ -334,7 +367,7 @@ test("6 waiter names Control: wait --as records --terminal on check", () => {
   }
 });
 
-test("7 one waiter: fresh lock is ALREADY_WAITING; stale lock starts a terminal", () => {
+test("7 one waiter: fresh lock is ALREADY_WAITING; stale lock starts a terminal; staleness follows --timeout-min", () => {
   const ctx = setup(DEFAULT_AGENTS, {});
   const outFile = path.join(ctx.repo, "wait.out");
   const lock = outFile + ".lock";
@@ -354,6 +387,44 @@ test("7 one waiter: fresh lock is ALREADY_WAITING; stale lock starts a terminal"
   assert.equal(/ALREADY_WAITING/.test(stale.stdout), false);
   const created = readLog(ctx.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create");
   assert.equal(created.length, 1);
+
+  const ctxLong = setup(DEFAULT_AGENTS, {});
+  const outLong = path.join(ctxLong.repo, "wait.out");
+  const lockLong = outLong + ".lock";
+  write(lockLong, String(Date.now() - 70 * 60000));
+  const held = runDely(["wait-bg", "--run", "run_1", "--out", outLong, "--timeout-min", "90"], ctxLong, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(held.stdout, /ALREADY_WAITING/);
+  assert.equal(
+    readLog(ctxLong.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create").length,
+    0,
+    "70 min lock must still hold under --timeout-min 90"
+  );
+
+  write(lockLong, String(Date.now() - 96 * 60000));
+  const expired = runDely(["wait-bg", "--run", "run_1", "--out", outLong, "--timeout-min", "90"], ctxLong, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(expired.stdout, /^WAITING\b/m);
+  assert.equal(readLog(ctxLong.logPath).filter((argv) => argv[0] === "terminal" && argv[1] === "create").length, 1);
+});
+
+test("7 wait-bg uses execPath and quotes run id, handle and skip", () => {
+  const ctx = setup(DEFAULT_AGENTS, {});
+  const outFile = path.join(ctx.repo, "wait.out");
+  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile, "--skip", "ctx_a,ctx_b"], ctx, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(r.stdout, /^WAITING\b/m);
+  const created = readLog(ctx.logPath).find((argv) => argv[0] === "terminal" && argv[1] === "create");
+  assert.ok(created, "terminal create recorded");
+  const cmd = created[created.indexOf("--command") + 1];
+  const q = JSON.stringify;
+  assert.ok(cmd.startsWith(q(process.execPath) + " "), cmd);
+  assert.ok(cmd.includes(" wait --run " + q("run_1") + " "), cmd);
+  assert.ok(cmd.includes(" --as " + q("term_ctrl")), cmd);
+  assert.ok(cmd.includes(" --skip " + q("ctx_a,ctx_b")), cmd);
 });
 
 test("8 wake target: notify uses run-show coordinator_handle, not --as", () => {
@@ -415,4 +486,26 @@ test("9 preflight: two pins PASS+FAIL exit 1; identical pins start one worker", 
   assert.equal(one.status, 0, one.stdout);
   const starts = readLog(same.logPath).filter((argv) => argv[1] === "worker-start");
   assert.equal(starts.length, 1);
+});
+
+test("9 preflight reports a failing check instead of spinning", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    checkError: "a waiter is already active on this Run",
+  });
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {
+    DELY_ACK_S: "2",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /PREFLIGHT implement cursor FAIL a waiter is already active on this Run/);
+  assert.match(r.stdout, /PREFLIGHT review claude FAIL a waiter is already active on this Run/);
+  assert.equal(/no worker_done/.test(r.stdout), false);
+  const log = readLog(ctx.logPath);
+  const checksOnly = log.filter((argv) => argv[0] === "orchestration" && argv[1] === "check");
+  assert.ok(checksOnly.length < 10, "must not spin on a failing check: " + checksOnly.length);
+  assert.ok(log.some((argv) => argv[1] === "worker-stop" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+  assert.ok(log.some((argv) => argv[1] === "worker-stop" && hasFlagPair(argv, "--dispatch", "ctx_bb22")));
+  assert.ok(log.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+  assert.ok(log.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_bb22")));
 });
