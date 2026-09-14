@@ -293,6 +293,27 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
   assert.equal(green.status, 7, green.stdout);
   assert.match(green.stdout, /DEADLINE/);
   assert.equal(/STALLED/.test(green.stdout), false);
+
+  const termPage = setup(DEFAULT_AGENTS, {
+    workers: [
+      {
+        dispatchId: "ctx_term",
+        dispatchStatus: "dispatched",
+        projection: {
+          attention: { requiresAction: false },
+          liveness: { verdict: "live" },
+          nextAction: null,
+        },
+      },
+    ],
+    workerRead: { terminalAdvance: true },
+  });
+  const term = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], termPage, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(term.status, 7, term.stdout);
+  assert.match(term.stdout, /DEADLINE/);
+  assert.equal(/STALLED/.test(term.stdout), false, "terminal latestCursor progress must not stall");
 });
 
 test("6 waiter names Control: wait --as records --terminal on check", () => {

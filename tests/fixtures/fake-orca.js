@@ -173,6 +173,16 @@ if (group === "orchestration" && cmd === "worker-read") {
   const n = (state.readCount[id] || 0) + 1;
   state.readCount[id] = n;
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
+  if (spec.terminalAdvance) {
+    saveState(state);
+    ok({
+      terminal: {
+        latestCursor: "t" + n,
+        limited: false,
+        returnedLineCount: 2,
+      },
+    });
+  }
   let transcript;
   if (spec.advance) {
     transcript = {

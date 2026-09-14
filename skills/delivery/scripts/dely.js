@@ -172,10 +172,10 @@ function advance(track, id) {
     const args = ["orchestration", "worker-read", "--dispatch", id, "--source", "auto", "--limit", "200"];
     if (t.cursor) args.push("--cursor", t.cursor);
     const res = orca(args).result || {};
-    const body = res.transcript || {};
-    const n = body.returnedMessageCount || 0;
-    if (n > 0 && t.cursor) t.at = Date.now();
-    if (body.nextCursor) t.cursor = body.nextCursor;
+    const body = res.transcript || res.terminal || {};
+    const cursor = body.latestCursor || body.nextCursor || null;
+    if (cursor && cursor !== t.cursor) t.at = Date.now();
+    if (cursor) t.cursor = cursor;
     if (!body.limited) break;
   }
   return (Date.now() - t.at) / 60000;
