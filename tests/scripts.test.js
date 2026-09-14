@@ -599,7 +599,7 @@ test("7 wait-bg uses execPath and quotes run id, handle and skip", () => {
   assert.ok(created, "terminal create recorded");
   const cmd = created[created.indexOf("--command") + 1];
   const q = JSON.stringify;
-  assert.ok(cmd.startsWith(q(process.execPath) + " "), cmd);
+  assert.ok(cmd.startsWith("DELY_WAITER=1 " + q(process.execPath) + " "), cmd);
   assert.ok(cmd.includes(" wait --run " + q("run_1") + " "), cmd);
   assert.ok(cmd.includes(" --as " + q("term_ctrl")), cmd);
   assert.ok(cmd.includes(" --control " + q("cursor")), cmd);
@@ -1119,7 +1119,7 @@ test("wait refuses a waker Control; missing --control is usage; wait-bg still wa
   const inner = runDely(
     ["wait", "--run", "run_1", "--control", "codex", "--as", "term_x", "--timeout-min", "0.05"],
     waiter,
-    { SPAWN_TIMEOUT_MS: 15000 }
+    { SPAWN_TIMEOUT_MS: 15000, DELY_WAITER: "1" }
   );
   assert.equal(inner.status, 0, inner.stdout);
   assert.match(inner.stdout, /SETTLED/);
@@ -1200,4 +1200,287 @@ test("preflight fails early on two consecutive gate polls, not one flash or an a
   assert.equal(/gate on screen/.test(bannerR.stdout), false, "agy not-signed-in banner must not fail: " + bannerR.stdout);
   assert.match(bannerR.stdout, /no worker_done/);
   assert.ok(bannerMs >= 250, "banner must wait the budget, not fail early: " + bannerMs + "ms");
+});
+
+function adoptFile(run) {
+  return path.join(os.tmpdir(), "dely-adopt-" + run + ".json");
+}
+
+function closes(log) {
+  return log.filter((argv) => argv[0] === "terminal" && argv[1] === "close");
+}
+
+test("adopted worker_done closes the recorded terminal once; non-adopted and missing file close none", () => {
+  const adoptedRun = "run_adopt_close";
+  try {
+    fs.unlinkSync(adoptFile(adoptedRun));
+  } catch (_) {
+    /* none */
+  }
+  const adopted = setup(AGY_AGENTS, {
+    terminalHandle: "term_agy",
+    workerStarts: [{ dispatchId: "ctx_agy1" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_agy1") }],
+    deliveries: [
+      {
+        deliveryId: "dv_agy",
+        messages: [{ type: "worker_done", payload: payload("ctx_agy1") }],
+      },
+    ],
+  });
+  const dispatched = runDely(
+    ["dispatch", "--repo", adopted.repo, "--run", adoptedRun, "--phase", "implement", "--spec-file", "task.md"],
+    adopted
+  );
+  assert.equal(dispatched.status, 0, dispatched.stderr + dispatched.stdout);
+  const recorded = JSON.parse(fs.readFileSync(adoptFile(adoptedRun), "utf8"));
+  assert.deepEqual(recorded, [{ dispatchId: "ctx_agy1", handle: "term_agy" }]);
+  const settled = runDely(["wait", "--run", adoptedRun, "--control", "cursor", "--timeout-min", "0.05"], adopted, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(settled.status, 0, settled.stdout);
+  assert.match(settled.stdout, /SETTLED/);
+  const adoptedCloses = closes(readLog(adopted.logPath)).filter((argv) => hasFlagPair(argv, "--terminal", "term_agy"));
+  assert.equal(adoptedCloses.length, 1, "adopted worker_done must close that handle once: " + JSON.stringify(adoptedCloses));
+  assert.equal(fs.existsSync(adoptFile(adoptedRun)), false, "settled adopt entry must be removed");
+
+  const other = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ab12") }],
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const otherRun = "run_non_adopt";
+  const otherDispatch = runDely(
+    ["dispatch", "--repo", other.repo, "--run", otherRun, "--phase", "implement", "--spec-file", "task.md"],
+    other
+  );
+  assert.equal(otherDispatch.status, 0, otherDispatch.stdout);
+  assert.equal(fs.existsSync(adoptFile(otherRun)), false, "non-adopted start must not write an adopt file");
+  const otherWait = runDely(["wait", "--run", otherRun, "--control", "cursor", "--timeout-min", "0.05"], other, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(otherWait.status, 0, otherWait.stdout);
+  assert.equal(closes(readLog(other.logPath)).length, 0, "non-adopted worker_done must not terminal close");
+
+  const missingRun = "run_missing_adopt";
+  try {
+    fs.unlinkSync(adoptFile(missingRun));
+  } catch (_) {
+    /* none */
+  }
+  const missing = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const missingWait = runDely(["wait", "--run", missingRun, "--control", "cursor", "--timeout-min", "0.05"], missing, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(missingWait.status, 0, missingWait.stdout);
+  assert.equal(closes(readLog(missing.logPath)).length, 0, "missing adopt file must not terminal close");
+});
+
+test("preflight PASS closes the adopted terminal", () => {
+  const run = "run_pf_adopt";
+  try {
+    fs.unlinkSync(adoptFile(run));
+  } catch (_) {
+    /* none */
+  }
+  const ctx = setup(AGY_AGENTS, {
+    terminalHandle: "term_agy",
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    deliveries: [
+      {
+        deliveryId: "dv_agy",
+        messages: [{ type: "worker_done", payload: payload("ctx_aa11") }],
+      },
+      {
+        deliveryId: "dv_claude",
+        messages: [{ type: "worker_done", payload: payload("ctx_bb22") }],
+      },
+    ],
+  });
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", run], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /PREFLIGHT implement antigravity PASS /);
+  assert.match(r.stdout, /PREFLIGHT review claude PASS /);
+  const agyCloses = closes(readLog(ctx.logPath)).filter((argv) => hasFlagPair(argv, "--terminal", "term_agy"));
+  assert.equal(agyCloses.length, 1, "preflight PASS must close the adopted handle: " + JSON.stringify(agyCloses));
+  assert.equal(fs.existsSync(adoptFile(run)), false);
+});
+
+test("wait --control codex --as without DELY_WAITER is REFUSED", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const r = runDely(["wait", "--run", "run_1", "--control", "codex", "--as", "term_x", "--timeout-min", "0.05"], ctx, {
+    SPAWN_TIMEOUT_MS: 5000,
+  });
+  assert.equal(r.status, 3, r.stdout);
+  assert.match(r.stdout, /^REFUSED codex wakes by waker; use dely wait-bg$/m);
+  assert.equal(
+    readLog(ctx.logPath).filter((argv) => argv[0] === "orchestration" && argv[1] === "check").length,
+    0,
+    "REFUSED must not check"
+  );
+});
+
+test("wait-bg sets DELY_WAITER on the waiter command", () => {
+  const ctx = setup(DEFAULT_AGENTS, {});
+  const outFile = path.join(ctx.repo, "wait.out");
+  const r = runDely(["wait-bg", "--run", "run_1", "--control", "codex", "--out", outFile], ctx, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(r.stdout, /^WAITING\b/m);
+  const created = readLog(ctx.logPath).find((argv) => argv[0] === "terminal" && argv[1] === "create");
+  assert.ok(created, "terminal create recorded");
+  const cmd = created[created.indexOf("--command") + 1];
+  assert.ok(cmd.startsWith("DELY_WAITER=1 "), cmd);
+  assert.ok(cmd.includes(" wait --run " + JSON.stringify("run_1") + " "), cmd);
+});
+
+test("preflight never fails a worker that already messaged on a gate line", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    deliveries: [
+      {
+        deliveryId: "dv_ack1",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_aa11") }],
+      },
+      {
+        deliveryId: "dv_ack2",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_aa11") }],
+      },
+      {
+        deliveryId: "dv_ack3",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_aa11") }],
+      },
+    ],
+    workerRead: {
+      source: "terminal",
+      tails: [
+        ["Security guide", "No, exit"],
+        ["Security guide", "No, exit"],
+        ["Security guide", "No, exit"],
+      ],
+    },
+  });
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {
+    DELY_PREFLIGHT_S: "0.8",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 1, r.stdout);
+  assert.equal(
+    /PREFLIGHT implement cursor FAIL gate/.test(r.stdout),
+    false,
+    "a messaged worker must not fail on a gate line: " + r.stdout
+  );
+  assert.match(r.stdout, /PREFLIGHT implement cursor FAIL no worker_done/);
+});
+
+test("preflight ignores usage-limit footers and Update available; hit your free usage limit still gates", () => {
+  function gateRun(tails) {
+    const ctx = setup(DEFAULT_AGENTS, {
+      workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+      workerRead: { source: "terminal", tails },
+    });
+    return runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {
+      DELY_PREFLIGHT_S: "2",
+      SPAWN_TIMEOUT_MS: 15000,
+    });
+  }
+  const approaching = gateRun([
+    ["Approaching usage limit"],
+    ["Approaching usage limit"],
+    ["Approaching usage limit"],
+  ]);
+  assert.equal(/gate on screen/.test(approaching.stdout), false, "Approaching usage limit must not gate: " + approaching.stdout);
+  assert.match(approaching.stdout, /no worker_done/);
+
+  const update = gateRun([
+    ["Update available"],
+    ["Update available"],
+    ["Update available"],
+  ]);
+  assert.equal(/gate on screen/.test(update.stdout), false, "Update available must not gate: " + update.stdout);
+  assert.match(update.stdout, /no worker_done/);
+
+  const blocked = gateRun([
+    ["hit your free usage limit"],
+    ["hit your free usage limit"],
+  ]);
+  assert.equal(blocked.status, 1, blocked.stdout);
+  assert.match(blocked.stdout, /FAIL gate on screen:.*hit your free usage limit/);
+});
+
+test("preflight sleeps a poll interval between gate observations even when check returned a delivery", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    deliveries: [
+      {
+        deliveryId: "dv_f1",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ffff") }],
+      },
+      {
+        deliveryId: "dv_f2",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ffff") }],
+      },
+    ],
+    workerRead: {
+      source: "terminal",
+      tails: [
+        ["Security guide"],
+        ["Security guide"],
+      ],
+    },
+  });
+  const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {
+    DELY_POLL_S: "0.4",
+    DELY_PREFLIGHT_S: "3",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /FAIL gate on screen/);
+  const state = JSON.parse(fs.readFileSync(ctx.statePath, "utf8"));
+  const times = (state.readAt && state.readAt.ctx_aa11) || [];
+  assert.ok(times.length >= 2, "must observe the screen at least twice: " + JSON.stringify(times));
+  assert.ok(times[1] - times[0] >= 350, "must sleep a poll interval between gate observations: " + (times[1] - times[0]) + "ms");
+});
+
+test("waitQuiet polls no more often than every 500 ms", () => {
+  const ctx = setup(AGY_AGENTS, {
+    terminalHandle: "term_agy",
+    workerStarts: [{ dispatchId: "ctx_agy1" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_agy1") }],
+  });
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_quiet_poll", "--phase", "implement", "--spec-file", "task.md"],
+    ctx,
+    { DELY_QUIET_MIN_S: "1", DELY_QUIET_S: "0.01", DELY_QUIET_CAP_S: "2", SPAWN_TIMEOUT_MS: 15000 }
+  );
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const log = readLog(ctx.logPath);
+  const startIdx = log.findIndex((argv) => argv[0] === "orchestration" && argv[1] === "worker-start");
+  const showsBefore = log.slice(0, startIdx).filter((argv) => argv[0] === "terminal" && argv[1] === "show").length;
+  assert.ok(showsBefore >= 2, "must poll at least twice while waiting for QUIET_MIN_S: " + showsBefore);
+  assert.ok(showsBefore <= 5, "must not poll faster than 500ms: showsBefore=" + showsBefore);
+  try {
+    fs.unlinkSync(adoptFile("run_quiet_poll"));
+  } catch (_) {
+    /* none */
+  }
 });

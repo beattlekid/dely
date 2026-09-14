@@ -173,6 +173,8 @@ if (group === "orchestration" && cmd === "worker-read") {
   const released = (state.released || []).includes(id);
   const n = (state.readCount[id] || 0) + 1;
   state.readCount[id] = n;
+  state.readAt = state.readAt || {};
+  state.readAt[id] = (state.readAt[id] || []).concat([Date.now()]);
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
   if (spec.error) {
     saveState(state);

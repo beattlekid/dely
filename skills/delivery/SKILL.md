@@ -154,10 +154,14 @@ Usage as the launcher prints it:
   dispatch ids from ATTENTION. A harness whose Control wake is not `background`
   prints `REFUSED <agent> wakes by <wake>; use dely wait-bg` with exit 3, and no `check` runs.
   Without `--control` it prints usage and exits 2. A waker Control never runs `dely wait`.
+  `--as` does not exempt that refusal. After printing `SETTLED` for a batch that holds a
+  `worker_done`, `wait` closes that dispatch's adopted terminal if one was recorded under
+  the OS temp directory for the Run.
 - `dely wait-bg --run <runId> --control <agent>` prints `WAITING` (exit 0),
   `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
   (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`.
   It takes the same `--skip`, `--stall-min` and `--timeout-min` as `wait`.
+  It sets `DELY_WAITER=1` on the waiter command so the inner `wait` is allowed.
   Default output and lock live under the OS temp directory keyed by run id,
   not in the worktree. The wake line names the full path of the output file to read
 - `dely notify --run <runId> --as <handle> --out <file>` types one line naming the output file and

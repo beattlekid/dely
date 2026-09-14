@@ -26,9 +26,7 @@ const GATES = [
   "Select login method",
   "posing security risks",
   "Session ended",
-  "usage limit",
   "hit your free usage limit",
-  "Update available",
 ];
 
 function orca(args) {
@@ -157,7 +155,65 @@ function waitQuiet(handle, launchedAt) {
     if (now >= cap) return false;
     const lo = lastOutputAt(handle);
     if (lo != null && (now - launchedAt) / 1000 >= QUIET_MIN_S && (now - lo) / 1000 >= QUIET_S) return true;
-    sleep(50);
+    sleep(500);
+  }
+}
+
+function adoptPath(run) {
+  return path.join(os.tmpdir(), "dely-adopt-" + run + ".json");
+}
+
+function readAdopts(run) {
+  try {
+    const j = JSON.parse(fs.readFileSync(adoptPath(run), "utf8"));
+    return Array.isArray(j) ? j : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeAdopts(run, rows) {
+  const p = adoptPath(run);
+  if (!rows.length) {
+    try {
+      fs.unlinkSync(p);
+    } catch (_) {
+      /* gone */
+    }
+    return;
+  }
+  fs.writeFileSync(p, JSON.stringify(rows));
+}
+
+function recordAdopt(run, dispatchId, handle) {
+  if (!run || !dispatchId || !handle) return;
+  const rows = readAdopts(run).filter((r) => r.dispatchId !== dispatchId);
+  rows.push({ dispatchId, handle });
+  writeAdopts(run, rows);
+}
+
+function takeAdopt(run, dispatchId) {
+  const rows = readAdopts(run);
+  const hit = rows.find((r) => r.dispatchId === dispatchId);
+  writeAdopts(
+    run,
+    rows.filter((r) => r.dispatchId !== dispatchId)
+  );
+  return (hit && hit.handle) || "";
+}
+
+function closeAdopted(run, dispatchId) {
+  closeCreated(takeAdopt(run, dispatchId));
+}
+
+function idOf(m) {
+  const raw = m && m.payload;
+  if (raw == null) return "";
+  try {
+    const p = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return (p && p.dispatchId) || "";
+  } catch (_) {
+    return "";
   }
 }
 
@@ -208,6 +264,7 @@ function start(repo, run, p, spec, title) {
     closeCreated(createdHandle);
     return { error: (r.error && r.error.message) || String((r.result && r.result.failedStage) || "worker-start") };
   }
+  if (createdHandle) recordAdopt(run, id, createdHandle);
   return { id, createdHandle };
 }
 
@@ -293,6 +350,7 @@ function preflight(f) {
     out(line);
     orca(["orchestration", "worker-stop", "--dispatch", id]);
     orca(["orchestration", "worker-release", "--dispatch", id]);
+    takeAdopt(f.run, id);
     closeCreated(rec.createdHandle);
     delete open[id];
     failed++;
@@ -332,13 +390,14 @@ function preflight(f) {
         if (hit && m.type === "worker_done") {
           out("PREFLIGHT " + open[hit].phase + " " + open[hit].agent + " PASS " + Math.round((Date.now() - t0) / 1000) + "s");
           orca(["orchestration", "worker-release", "--dispatch", hit]);
+          closeAdopted(f.run, hit);
           delete open[hit];
         }
       }
       orca(["orchestration", "check", "--run", f.run, "--ack", res.deliveryId]);
     }
     pollGates();
-    if (!res.deliveryId) sleep(Math.max(1, Math.floor(POLL_S * 1000)));
+    sleep(Math.max(1, Math.floor(POLL_S * 1000)));
   }
   for (const [id, rec] of Object.entries(open)) {
     drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id));
@@ -363,6 +422,7 @@ function dispatch(f) {
   const why = lastText(s.id);
   orca(["orchestration", "worker-stop", "--dispatch", s.id]);
   orca(["orchestration", "worker-release", "--dispatch", s.id]);
+  takeAdopt(f.run, s.id);
   closeCreated(s.createdHandle);
   out("NO_ACK " + s.id + " stopped after " + ACK_S + "s; last output: " + why, 4);
 }
@@ -391,7 +451,9 @@ function advance(track, id) {
 
 function wait(f) {
   const wake = harnessCell(f.control, 6) || "unknown";
-  if (wake !== "background" && !f.as) out("REFUSED " + f.control + " wakes by " + wake + "; use dely wait-bg", 3);
+  if (wake !== "background" && process.env.DELY_WAITER !== "1") {
+    out("REFUSED " + f.control + " wakes by " + wake + "; use dely wait-bg", 3);
+  }
   const deadline = Date.now() + Number(f["timeout-min"] || 60) * 60000;
   const stallMin = Number(f["stall-min"] || 10);
   const skip = String(f.skip || "").split(",").filter(Boolean);
@@ -414,8 +476,8 @@ function wait(f) {
     if (res.deliveryId) {
       const msgs = res.messages || [];
       if (msgs.some((m) => ["worker_done", "escalation", "question"].includes(m.type))) {
-        out(
-          {
+        console.log(
+          JSON.stringify({
             SETTLED: res.deliveryId,
             messages: msgs.map((m) => ({
               id: m.id,
@@ -424,9 +486,12 @@ function wait(f) {
               subject: m.subject,
               payload: m.payload,
             })),
-          },
-          0
+          })
         );
+        for (const m of msgs) {
+          if (m.type === "worker_done") closeAdopted(f.run, idOf(m));
+        }
+        process.exit(0);
       }
       orca(["orchestration", "check", ...as, "--run", f.run, "--ack", res.deliveryId]);
       continue;
@@ -521,6 +586,7 @@ function waitBg(f) {
     .map((k) => " --" + k + " " + q(f[k]))
     .join("");
   const cmd =
+    "DELY_WAITER=1 " +
     bin +
     " " +
     self +
