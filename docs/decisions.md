@@ -3,13 +3,141 @@
 What has been settled, what is still open, and what was rejected and why.
 Rationale is kept because the reasons are the reusable part.
 
-Last updated 2026-09-13.
+Last updated 2026-09-14.
 
 ---
 
 ## Settled
 
+### 2026-09-14 — Dely coordinates on Orca's own supervised loop; the 0.18.0 runtime is replaced by a small helper
+
+#### Context
+
+The 2026-09-11 runtime (`dely.js`, 1,736 lines, 3,751 lines of tests and a fake
+Orca) passed every review and CI. Live probes on 2026-09-13 in fresh repositories,
+with every harness pinned to the candidate, still stalled Controls:
+
+- **Nudge wake lost events.** A `worker_done` that arrived while a nudge-mode
+  Control's turn was still active was never nudged. That lost 2 of 2 wakes in one
+  Antigravity delivery. A Copilot Control's nudge sat unsubmitted after its TUI
+  reloaded. Orca's own guide calls a nudge best-effort attention.
+- **Nudge-form verify misbehaved under a real Control.** It blocked about 56 s,
+  beyond Codex's 30 s exec yield. Codex started a second verify, and that one
+  wrote FAIL although both workers succeeded.
+- **Most live defects sat in code that re-derives what Orca already reports.**
+  Examples: adopted-terminal ownership read from a shape only the fake used, a
+  fallback that also closed a terminal a human took over, verify-Run restore and
+  fencing, an Antigravity log classifier that blamed every unexplained NO_ACK on
+  quota, and Kiro's adopted argv.
+- **Dead time, not wrong code, dominated.** Measured: a worker dead of a
+  connection loss undetected for 2 h 15 min, an unsubmitted prompt for 12 min,
+  and lost wakes for 4 to 20 min.
+
+A Spike on 2026-09-14 measured the alternative:
+
+- **Control on Orca's own loop.** Control ran `orca skills get orchestration`,
+  plus a slim protocol and an 83-line helper.
+  - Claude and Cursor Controls delivered end to end.
+  - A killed worker surfaced as `projection.attention.requiresAction` with
+    `nextAction: worker-release`; Control followed it and dispatched once more.
+  - Control diagnosed a signed-out Antigravity from `worker-read`, with no
+    classifier.
+- **Codex as Control.** Codex reaps any process its exec starts, `nohup`
+  included. A waiter run as a separate Orca terminal survived, ran `check`
+  with `--terminal` naming Control, and typed a wake line into Codex. Codex then
+  delivered end to end and ignored Orca nudges. Orca allows one active waiter
+  per Run.
+- **Dead-time signals Orca already exposes.**
+  - A preflight ACK-only dispatch per pin failed a signed-out Antigravity in
+    106 s, before any work.
+  - A 15 s wait cycle reported a killed worker 15 s after the kill.
+  - A `worker-read` cursor that stopped advancing reported a stalled worker at
+    140 s with a 2-minute threshold, while Orca liveness still said `live`.
+- **Structured worker mode** (Orca 1.4.200, a user setting for new agent tabs).
+  - Claude workers ran with no terminal in an untrusted repository, with model
+    and effort pins kept.
+  - Codex structured workers run their shell inside Codex's sandbox, cannot
+    reach Orca, and never send `worker_done`.
+
+#### Decision
+
+1. **Control follows Orca's supervised loop.** The delivery skill tells Control
+   to load `orca skills get orchestration` and follow it for Runs, consuming and
+   acknowledging, completion accounting, recovery and cleanup. Dely keeps only
+   the protocol: gates, shapes, acceptance, roles, review, remediation and
+   release.
+2. **A small helper replaces the runtime.** `skills/delivery/scripts/dely.js`
+   has five commands:
+   - `preflight`: one ACK-only dispatch per distinct pin at delivery start.
+   - `dispatch`: pin to `worker-start`, then an ACK peek.
+   - `wait`: whole-batch `SETTLED`, `ATTENTION` from Orca's projection, and
+     `STALLED` from a non-advancing `worker-read` cursor.
+   - `wait-bg`: a waiter in a separate Orca terminal, with a lock, that wakes
+     Control by typing a line.
+   - `notify`: the wake line itself.
+
+   It keeps no verdict, run memory, classifier, adopted launch or nudge
+   handling.
+3. **Wake by harness.** A Control whose harness resumes when a background
+   command exits (Claude Code, Cursor Agent CLI, GitHub Copilot CLI) runs `wait`
+   in the background. Codex, Antigravity and Grok use `wait-bg`. Kiro is not
+   supported as Control. Nudges are never a wake source.
+4. **Pins.** `worker-start --model`/`--effort` for Claude, Codex and Cursor.
+   Other harnesses take their model from Orca's per-agent default arguments.
+5. **Setup ends with `dely preflight`.** The `dely:verify` skill is deleted.
+6. **Worker mode is the user's Orca setting.** Structured Claude workers need
+   no workspace trust. Codex workers must stay terminal workers while its
+   structured sandbox cannot reach Orca.
+
+This supersedes items 2, 4 and 5 of the 2026-09-11 decision and the runtime
+parts of its item 9. Items 1, 3, 6 and 7 carry forward in reduced form.
+
+#### Alternatives considered
+
+**Keep the 0.18.0 runtime and restrict Control to background harnesses.**
+Rejected: it keeps the code where the live defects were and the fake that hid
+them, and still loses no fewer events for Codex.
+
+**Mitigate nudges.** Rejected: the lost-event window is Orca's, and the helper's
+own waker removes it.
+
+**Protocol only, no helper.** Rejected after the Spike. The two operations
+Controls get wrong are consuming whole batches and choosing a wait form, and a
+hand-written waiter spun on an unacknowledged `status` batch.
+
+**Structured workers for every harness.** Not available: Orca offers it for
+Claude and Codex only, and Codex cannot report from it.
+
+#### Consequences
+
+- About 90% of the runtime and test code is deleted. Behaviour now depends on
+  Orca's projection fields `attention`, `nextAction` and `liveness`, and on
+  `worker-read` cursors, all measured live on Orca 1.4.200.
+- A quiet but legitimate long command can trip `STALLED`. Control reads the last
+  output and may wait again. The default threshold is set above normal quiet
+  stretches.
+- A waker terminal is left until its wait ends if Control abandons it.
+- Control model quality is a precondition. Copilot's Free plan offers only Auto,
+  and its Auto model once implemented the change itself instead of delivering it.
+- Proactive human notification is not provided.
+
+#### Non-goals
+
+- Fixing Orca's nudge.
+- Codex structured workers.
+- Kiro as Control.
+- Changing this repository's pins.
+
+#### Deferred
+
+- **Proactive human notification.** Trigger: a delivery that waits on a human
+  for longer than its stall threshold.
+- **Codex structured workers.** Trigger: an Orca or Codex release that lets its
+  sandbox reach Orca.
+
 ### 2026-09-11 — Workers acknowledge, Control sleeps until an event, and `dely:verify` proves the path before the first dispatch
+
+**Superseded in part 2026-09-14:** the runtime, verify, adopted launch and nudge wake below are replaced by the 2026-09-14 decision above; this record keeps the measurements and history.
 
 #### Context
 
