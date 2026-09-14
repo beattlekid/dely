@@ -159,8 +159,8 @@ and `CLAUDE.md`. Grok does not expand it.
 ## Trust
 
 After the managed block is written, for each pinned harness whose `Setup`
-column in `skills/delivery/references/harnesses.md` is `trust dialog` or
-`trust-all confirmation`, open it once for the human with
+column in `skills/delivery/references/harnesses.md` is `trust dialog`,
+`trust-all confirmation`, or `y/n security question`, open it once for the human with
 `orca terminal create --worktree path:<repo> --command "<binary> <permission default>"`.
 The binary is `claude`, `codex`, `grok`, `agy`, `kiro-cli`, `cursor-agent`,
 or `copilot` for that harness. Take the permission default from the harness

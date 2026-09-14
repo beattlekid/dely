@@ -145,14 +145,16 @@ Usage as the launcher prints it:
   prints `DISPATCHED <dispatchId>` (exit 0),
   `NO_ACK <dispatchId> stopped after <s>s; last output: <text>` (exit 4), or
   `FAILED <reason>` (exit 5)
-- `dely wait --run <runId>` prints a JSON object with `SETTLED` (exit 0) or
+- `dely wait --run <runId> --control <agent>` prints a JSON object with `SETTLED` (exit 0) or
   `ATTENTION` (exit 8), or
   `STALLED <dispatchId> <why>; liveness <json>; last output: <text>` (exit 6),
   `DEADLINE` (exit 7), or `ERROR <reason>` (exit 9). STALLED only for transcript workers (Claude Code, Codex CLI); terminal workers surface a stall at DEADLINE; the failure lines quote the worker's screen. `--timeout-min` (default 60)
   is the wait budget. `--as <handle>` passes
   `--terminal <handle>` on every consuming `check`. `--skip` omits those
-  dispatch ids from ATTENTION
-- `dely wait-bg --run <runId>` prints `WAITING` (exit 0),
+  dispatch ids from ATTENTION. A harness whose Control wake is not `background`
+  prints `REFUSED <agent> wakes by <wake>; use dely wait-bg` with exit 3, and no `check` runs.
+  Without `--control` it prints usage and exits 2. A waker Control never runs `dely wait`.
+- `dely wait-bg --run <runId> --control <agent>` prints `WAITING` (exit 0),
   `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
   (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`.
   It takes the same `--skip`, `--stall-min` and `--timeout-min` as `wait`.
@@ -207,16 +209,18 @@ deliberately.
 
 **Sleep and wait after `DISPATCHED`, by wake mode:**
 
-- **background:** run `dely wait --run <run>` as a background command and
+- **background:** run `dely wait --run <run> --control <agent>` as a background command and
   end the turn.
-- **waker:** run `dely wait-bg --run <run>` as its last command, then end
-  the turn.
+- **waker:** run `dely wait-bg --run <run> --control <agent>` as its last command, then end
+  the turn. A waker Control never runs `dely wait`.
 - **unsupported:** that harness cannot be Control.
 
 **Result handling:**
 
 - **any `PREFLIGHT … FAIL` (exit 1):** do not dispatch to any pin; relay
-  the printed reason to the human.
+  the printed reason to the human. A `PREFLIGHT … FAIL` or `NO_ACK` worker is already
+  stopped and released, so the human runs that harness once in a new terminal to
+  answer its dialog (setup's trust step), and Control then reruns `dely preflight`.
 - **`SETTLED`:** process the batch, do the guide's completion accounting,
   and acknowledge.
 - **`ATTENTION`:** follow `nextAction` and skip that id next time.

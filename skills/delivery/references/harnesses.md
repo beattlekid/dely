@@ -10,7 +10,7 @@ Codex and Cursor come from Orca's per-agent default arguments.
 | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | `--dangerously-skip-permissions` | `claude -p` | `--model` pin honoured | background | trust dialog |
 | Codex CLI | `codex` | `--dangerously-bypass-approvals-and-sandbox` | `codex exec` | | waker | Orca preflight |
-| Grok Build | `grok` | `--permission-mode bypassPermissions` | `grok --prompt-file` | | waker | none |
+| Grok Build | `grok` | `--permission-mode bypassPermissions` | `grok --prompt-file` | | waker | y/n security question |
 | Antigravity CLI | `antigravity` | `--dangerously-skip-permissions` | `agy -p`/`--print` | | waker | trust dialog |
 | Kiro CLI | `kiro` | none; `--trust-all-tools` is forbidden on the launch argv | `kiro-cli chat --no-interactive` | | unsupported | trust-all confirmation |
 | Cursor Agent CLI | `cursor` | `--force` | `cursor-agent -p`/`--print` | `--model` pin honoured; omit `--effort` when Effort is `default` | background | trust dialog |

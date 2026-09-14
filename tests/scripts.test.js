@@ -57,6 +57,9 @@ function runDely(args, ctx, extraEnv) {
     DELY_ACK_S: extraEnv.DELY_ACK_S != null ? String(extraEnv.DELY_ACK_S) : "1",
     DELY_PREFLIGHT_S: extraEnv.DELY_PREFLIGHT_S != null ? String(extraEnv.DELY_PREFLIGHT_S) : "1",
     DELY_PROGRESS_S: extraEnv.DELY_PROGRESS_S != null ? String(extraEnv.DELY_PROGRESS_S) : "0",
+    DELY_QUIET_S: extraEnv.DELY_QUIET_S != null ? String(extraEnv.DELY_QUIET_S) : "0.05",
+    DELY_QUIET_MIN_S: extraEnv.DELY_QUIET_MIN_S != null ? String(extraEnv.DELY_QUIET_MIN_S) : "0.05",
+    DELY_QUIET_CAP_S: extraEnv.DELY_QUIET_CAP_S != null ? String(extraEnv.DELY_QUIET_CAP_S) : "2",
   });
   delete env.SPAWN_TIMEOUT_MS;
   delete env.CWD;
@@ -247,7 +250,7 @@ test("3 settling batch left unacked", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /SETTLED/);
   assert.match(r.stdout, /dv_mix/);
@@ -265,7 +268,7 @@ test("3 question-only batch SETTLED unacked", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /SETTLED/);
   assert.match(r.stdout, /dv_q/);
@@ -282,7 +285,7 @@ test("3 escalation-only batch SETTLED unacked", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--timeout-min", "0.05"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /SETTLED/);
   assert.match(r.stdout, /dv_esc/);
@@ -303,7 +306,7 @@ test("3 non-settling batch acked then SETTLED", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.08"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--timeout-min", "0.08"], ctx, { SPAWN_TIMEOUT_MS: 15000 });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /SETTLED/);
   assert.match(r.stdout, /dv_done/);
@@ -325,7 +328,7 @@ test("4 ATTENTION on a failed row", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--timeout-min", "0.2"], ctx);
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--timeout-min", "0.2"], ctx);
   assert.equal(r.status, 8, r.stdout);
   assert.match(r.stdout, /ATTENTION/);
   assert.match(r.stdout, /ctx_dead/);
@@ -365,7 +368,7 @@ test("4 no ATTENTION noise: completed and dispatched unverifiable with nextActio
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--skip", "ctx_skip", "--timeout-min", "0.05", "--stall-min", "10"], ctx, {
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--skip", "ctx_skip", "--timeout-min", "0.05", "--stall-min", "10"], ctx, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(r.status, 7, r.stdout);
@@ -388,7 +391,7 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
     ],
     workerRead: { nextCursor: "c0", limited: false, returnedMessageCount: 0 },
   });
-  const red = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], stalled, {
+  const red = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], stalled, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(red.status, 6, red.stdout);
@@ -409,7 +412,7 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
     ],
     workerRead: { advance: true },
   });
-  const green = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], moving, {
+  const green = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.08"], moving, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(green.status, 7, green.stdout);
@@ -430,7 +433,7 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
     ],
     workerRead: { terminalAdvance: true },
   });
-  const term = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], termPage, {
+  const term = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.08"], termPage, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(term.status, 7, term.stdout);
@@ -453,7 +456,7 @@ test("5 STALLED names worker-read error for an open dispatch", () => {
     ],
     workerRead: { error: "worker_identity_changed" },
   });
-  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(r.status, 6, r.stdout);
@@ -477,7 +480,7 @@ test("5 stall detection ignores non-dispatched rows", () => {
     ],
     workerRead: { nextCursor: "c0", limited: false, returnedMessageCount: 0 },
   });
-  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], ctx, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(r.status, 7, r.stdout);
@@ -505,7 +508,7 @@ test("5 advance stops paging on a 0-row limited page", () => {
     ],
     workerRead: { nextCursor: "c0", limited: true, returnedMessageCount: 0 },
   });
-  const r = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.12"], ctx, {
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.12"], ctx, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(r.status, 6, r.stdout);
@@ -528,7 +531,7 @@ test("6 waiter names Control: wait --as records --terminal on check", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--as", "term_x"], ctx);
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--as", "term_x"], ctx);
   assert.equal(r.status, 0, r.stdout);
   const waitChecks = checks(readLog(ctx.logPath));
   assert.ok(waitChecks.length);
@@ -545,7 +548,7 @@ test("7 one waiter: live recorded terminal is ALREADY_WAITING; missing terminal 
   const outFile = path.join(ctx.repo, "wait.out");
   const lock = outFile + ".lock";
   write(lock, JSON.stringify({ terminal: "term_w" }));
-  const fresh = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
+  const fresh = runDely(["wait-bg", "--run", "run_1", "--control", "cursor", "--out", outFile], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(fresh.stdout, /ALREADY_WAITING/);
@@ -563,7 +566,7 @@ test("7 one waiter: live recorded terminal is ALREADY_WAITING; missing terminal 
   const outDead = path.join(ctxDead.repo, "wait.out");
   const lockDead = outDead + ".lock";
   write(lockDead, JSON.stringify({ terminal: "term_dead" }));
-  const stale = runDely(["wait-bg", "--run", "run_1", "--out", outDead], ctxDead, {
+  const stale = runDely(["wait-bg", "--run", "run_1", "--control", "cursor", "--out", outDead], ctxDead, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(stale.stdout, /^WAITING\b/m);
@@ -577,7 +580,7 @@ test("7 wait-bg records the created terminal handle in the lock", () => {
   const ctx = setup(DEFAULT_AGENTS, { terminalHandle: "term_wait1" });
   const outFile = path.join(ctx.repo, "wait.out");
   const lock = outFile + ".lock";
-  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
+  const r = runDely(["wait-bg", "--run", "run_1", "--control", "cursor", "--out", outFile], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(r.stdout, /^WAITING\b/m);
@@ -588,7 +591,7 @@ test("7 wait-bg records the created terminal handle in the lock", () => {
 test("7 wait-bg uses execPath and quotes run id, handle and skip", () => {
   const ctx = setup(DEFAULT_AGENTS, {});
   const outFile = path.join(ctx.repo, "wait.out");
-  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile, "--skip", "ctx_a,ctx_b"], ctx, {
+  const r = runDely(["wait-bg", "--run", "run_1", "--control", "cursor", "--out", outFile, "--skip", "ctx_a,ctx_b"], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(r.stdout, /^WAITING\b/m);
@@ -599,6 +602,7 @@ test("7 wait-bg uses execPath and quotes run id, handle and skip", () => {
   assert.ok(cmd.startsWith(q(process.execPath) + " "), cmd);
   assert.ok(cmd.includes(" wait --run " + q("run_1") + " "), cmd);
   assert.ok(cmd.includes(" --as " + q("term_ctrl")), cmd);
+  assert.ok(cmd.includes(" --control " + q("cursor")), cmd);
   assert.ok(cmd.includes(" --skip " + q("ctx_a,ctx_b")), cmd);
 });
 
@@ -702,7 +706,7 @@ test("preflight without required flags prints usage and exits 2", () => {
 
 test("7 wait-bg default output lives under os.tmpdir keyed by run id", () => {
   const ctx = setup(DEFAULT_AGENTS, { terminalHandle: "term_w" });
-  const r = runDely(["wait-bg", "--run", "run_xyz"], ctx, {
+  const r = runDely(["wait-bg", "--run", "run_xyz", "--control", "cursor"], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.match(r.stdout, /^WAITING\b/m);
@@ -722,7 +726,7 @@ test("7 wait-bg lock vanished between wx and read does not throw", () => {
   const outFile = path.join(ctx.repo, "wait.out");
   const lock = outFile + ".lock";
   fs.mkdirSync(lock);
-  const r = runDely(["wait-bg", "--run", "run_1", "--out", outFile], ctx, {
+  const r = runDely(["wait-bg", "--run", "run_1", "--control", "cursor", "--out", outFile], ctx, {
     ORCA_TERMINAL_HANDLE: "term_ctrl",
   });
   assert.equal(/EISDIR/.test(r.stderr), false, r.stderr);
@@ -740,7 +744,7 @@ test("flags() does not take a following --flag as a value", () => {
       },
     ],
   });
-  const r = runDely(["wait", "--run", "run_1", "--skip", "--as", "term_x"], ctx);
+  const r = runDely(["wait", "--run", "run_1", "--control", "cursor", "--skip", "--as", "term_x"], ctx);
   assert.equal(r.status, 0, r.stdout);
   const waitChecks = checks(readLog(ctx.logPath));
   assert.ok(waitChecks.length);
@@ -896,7 +900,7 @@ test("5 STALLED only for transcript; terminal source reaches DEADLINE however id
     workers,
     workerRead: { source: "terminal", terminalAdvance: true, tail: [SIGNED_OUT] },
   });
-  const moving = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], movingTerm, {
+  const moving = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.08"], movingTerm, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(moving.status, 7, moving.stdout);
@@ -917,7 +921,7 @@ test("5 STALLED only for transcript; terminal source reaches DEADLINE however id
       },
     },
   });
-  const idle = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], idleTerm, {
+  const idle = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], idleTerm, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(idle.status, 7, idle.stdout);
@@ -934,7 +938,7 @@ test("5 STALLED only for transcript; terminal source reaches DEADLINE however id
       messages: [liveMsg(SIGNED_OUT)],
     },
   });
-  const stalled = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], frozenTx, {
+  const stalled = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], frozenTx, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(stalled.status, 6, stalled.stdout);
@@ -960,7 +964,7 @@ test("5 STALLED only for transcript; terminal source reaches DEADLINE however id
       ],
     },
   });
-  const toolStalled = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], toolOnly, {
+  const toolStalled = runDely(["wait", "--run", "run_1", "--control", "cursor", "--stall-min", "0.02", "--timeout-min", "0.15"], toolOnly, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(toolStalled.status, 6, toolStalled.stdout);
@@ -1007,4 +1011,193 @@ test("8 notify falls back from a non-numeric retry interval and still gives up",
   assert.notEqual(r.status, null, "must not hang on NaN retry: " + ((r.error && r.error.code) || r.stderr));
   assert.notEqual(r.status, 0, "give-up must exit non-zero: " + r.stderr + r.stdout);
   assert.ok(elapsed < 4000, "must exit within the scaled give-up, not the default retry: " + elapsed + "ms");
+});
+
+const AGY_AGENTS = `# dely
+
+| Phase | Harness | Model | Effort |
+| --- | --- | --- | --- |
+| \`implement\` | Antigravity CLI | default | default |
+| \`review\` | Claude Code | claude-opus-5 | medium |
+`;
+
+const GATE_PREAMBLE = Array.from({ length: 30 }, (_, i) => "PREAMBLE_" + String(i).padStart(2, "0") + " " + "x".repeat(80));
+
+test("antigravity adopt waits for quiet then worker-start --terminal; no --agent", () => {
+  const ctx = setup(AGY_AGENTS, {
+    terminalHandle: "term_agy",
+    terminalShow: { busyShows: 2 },
+    workerStarts: [{ dispatchId: "ctx_agy1" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_agy1") }],
+  });
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
+    ctx
+  );
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const log = readLog(ctx.logPath);
+  const createIdx = log.findIndex((argv) => argv[0] === "terminal" && argv[1] === "create");
+  const startIdx = log.findIndex((argv) => argv[0] === "orchestration" && argv[1] === "worker-start");
+  assert.ok(createIdx >= 0, "terminal create recorded");
+  assert.ok(startIdx >= 0, "worker-start recorded");
+  assert.ok(createIdx < startIdx, "create before worker-start");
+  const showsBefore = log.slice(0, startIdx).filter((argv) => argv[0] === "terminal" && argv[1] === "show").length;
+  assert.ok(showsBefore >= 2, "must wait for quiescence before adopt: showsBefore=" + showsBefore);
+  const created = log[createIdx];
+  assert.ok(hasFlagPair(created, "--command", "agy --dangerously-skip-permissions"), String(created));
+  const started = log[startIdx];
+  assert.ok(hasFlagPair(started, "--terminal", "term_agy"), String(started));
+  assert.equal(started.includes("--agent"), false, "adopted start must not pass --agent: " + started);
+  assert.equal(started.includes("--model"), false, started);
+  assert.equal(started.includes("--effort"), false, started);
+});
+
+test("claude pin still uses worker-start --agent claude", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_cd34" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_cd34") }],
+  });
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_1", "--phase", "review", "--spec-file", "task.md"],
+    ctx
+  );
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const log = readLog(ctx.logPath);
+  assert.equal(
+    log.filter((argv) => argv[0] === "terminal" && argv[1] === "create").length,
+    0,
+    "claude must not adopt"
+  );
+  const started = startArgv(log);
+  assert.ok(hasFlagPair(started, "--agent", "claude"), String(started));
+  assert.equal(started.includes("--terminal"), false, String(started));
+});
+
+test("wait refuses a waker Control; missing --control is usage; wait-bg still waits", () => {
+  const refused = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const r = runDely(["wait", "--run", "run_1", "--control", "codex", "--timeout-min", "0.05"], refused, {
+    SPAWN_TIMEOUT_MS: 5000,
+  });
+  assert.equal(r.status, 3, r.stdout);
+  assert.match(r.stdout, /^REFUSED codex wakes by waker; use dely wait-bg$/m);
+  assert.equal(
+    readLog(refused.logPath).filter((argv) => argv[0] === "orchestration" && argv[1] === "check").length,
+    0,
+    "REFUSED must not check"
+  );
+
+  const missing = setup();
+  const bare = runDely(["wait", "--run", "run_1"], missing);
+  assert.equal(bare.status, 2, bare.stdout);
+  assert.match(bare.stdout, /^usage:/);
+
+  const bg = setup(DEFAULT_AGENTS, { terminalHandle: "term_w" });
+  const outFile = path.join(bg.repo, "wait.out");
+  const waiting = runDely(["wait-bg", "--run", "run_1", "--control", "codex", "--out", outFile], bg, {
+    ORCA_TERMINAL_HANDLE: "term_ctrl",
+  });
+  assert.match(waiting.stdout, /^WAITING\b/m);
+  const created = readLog(bg.logPath).find((argv) => argv[0] === "terminal" && argv[1] === "create");
+  const cmd = created[created.indexOf("--command") + 1];
+  assert.ok(cmd.includes(" --control " + JSON.stringify("codex")), cmd);
+
+  const waiter = setup(DEFAULT_AGENTS, {
+    deliveries: [
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_ab12") }],
+      },
+    ],
+  });
+  const inner = runDely(
+    ["wait", "--run", "run_1", "--control", "codex", "--as", "term_x", "--timeout-min", "0.05"],
+    waiter,
+    { SPAWN_TIMEOUT_MS: 15000 }
+  );
+  assert.equal(inner.status, 0, inner.stdout);
+  assert.match(inner.stdout, /SETTLED/);
+});
+
+test("failure quote prefers a gate line over a long preamble", () => {
+  const tail = GATE_PREAMBLE.concat(["Security guide", "No, exit"], GATE_PREAMBLE);
+  const nack = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ffff") }],
+    workerRead: { source: "terminal", terminal: { handle: "term_w", status: "running", tail } },
+  });
+  const r = runDely(
+    ["dispatch", "--repo", nack.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
+    nack,
+    { DELY_ACK_S: "1" }
+  );
+  assert.equal(r.status, 4, r.stdout);
+  const quoted = lastOutput(r.stdout);
+  assert.match(quoted, /Security guide/);
+  assert.equal(/PREAMBLE_00/.test(quoted), false, "must not quote the preamble: " + quoted);
+});
+
+test("preflight fails early on two consecutive gate polls, not one flash or an agy banner", () => {
+  const two = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    workerRead: {
+      source: "terminal",
+      tails: [
+        ["Security guide", "No, exit"],
+        ["Security guide", "No, exit"],
+      ],
+    },
+  });
+  const t0 = Date.now();
+  const early = runDely(["preflight", "--repo", two.repo, "--run", "run_1"], two, {
+    DELY_PREFLIGHT_S: "2",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  const earlyMs = Date.now() - t0;
+  assert.equal(early.status, 1, early.stdout);
+  assert.match(early.stdout, /PREFLIGHT implement cursor FAIL gate on screen:.*Security guide/);
+  assert.ok(earlyMs < 1200, "must fail well before the 2s budget: " + earlyMs + "ms");
+  assert.equal(/no worker_done/.test(early.stdout), false, early.stdout);
+  const twoLog = readLog(two.logPath);
+  assert.ok(twoLog.some((argv) => argv[1] === "worker-stop" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+  assert.ok(twoLog.some((argv) => argv[1] === "worker-release" && hasFlagPair(argv, "--dispatch", "ctx_aa11")));
+
+  const flash = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    workerRead: {
+      source: "terminal",
+      tails: [["Security guide"], ["ready"], ["ready"]],
+    },
+  });
+  const flashR = runDely(["preflight", "--repo", flash.repo, "--run", "run_1"], flash, {
+    DELY_PREFLIGHT_S: "0.4",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(flashR.status, 1, flashR.stdout);
+  assert.equal(/gate on screen/.test(flashR.stdout), false, "one-poll flash must not fail: " + flashR.stdout);
+  assert.match(flashR.stdout, /no worker_done/);
+
+  const banner = setup(AGY_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
+    workerRead: {
+      source: "terminal",
+      tails: [[SIGNED_OUT], [SIGNED_OUT], [SIGNED_OUT]],
+    },
+  });
+  const t1 = Date.now();
+  const bannerR = runDely(["preflight", "--repo", banner.repo, "--run", "run_1"], banner, {
+    DELY_PREFLIGHT_S: "0.4",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  const bannerMs = Date.now() - t1;
+  assert.equal(bannerR.status, 1, bannerR.stdout);
+  assert.equal(/gate on screen/.test(bannerR.stdout), false, "agy not-signed-in banner must not fail: " + bannerR.stdout);
+  assert.match(bannerR.stdout, /no worker_done/);
+  assert.ok(bannerMs >= 250, "banner must wait the budget, not fail early: " + bannerMs + "ms");
 });

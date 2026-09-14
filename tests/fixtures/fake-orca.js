@@ -183,7 +183,10 @@ if (group === "orchestration" && cmd === "worker-read") {
     spec.source === "terminal" || spec.terminalAdvance || (spec.terminal && spec.source !== "transcript");
   if (isTerminal) {
     const nextCursor = spec.terminalAdvance ? "t" + n : term.nextCursor || spec.nextCursor || "t0";
-    const tail = term.tail || spec.tail || [];
+    const sequenced = Array.isArray(spec.tails) ? spec.tails : Array.isArray(term.tails) ? term.tails : null;
+    const tail = sequenced
+      ? sequenced[Math.min(n - 1, sequenced.length - 1)] || []
+      : term.tail || spec.tail || [];
     saveState(state);
     const result = {
       source: "terminal",
@@ -340,6 +343,27 @@ if (group === "orchestration" && cmd === "check") {
 if (group === "terminal" && cmd === "create") {
   saveState(state);
   ok({ terminal: { handle: scenario.terminalHandle || "term_w" } });
+}
+
+if (group === "terminal" && cmd === "show") {
+  const n = (state.showCount || 0) + 1;
+  state.showCount = n;
+  const spec = scenario.terminalShow || {};
+  const busy = Number(spec.busyShows) || 0;
+  const lastOutputAt = n <= busy ? Date.now() : spec.lastOutputAt != null ? spec.lastOutputAt : Date.now() - 60000;
+  saveState(state);
+  ok({
+    terminal: {
+      handle: flags.terminal || scenario.terminalHandle || "term_w",
+      lastOutputAt,
+    },
+  });
+}
+
+if (group === "terminal" && cmd === "close") {
+  state.closed = (state.closed || []).concat([flags.terminal]);
+  saveState(state);
+  ok({ terminal: { handle: flags.terminal } });
 }
 
 if (group === "terminal" && cmd === "list") {
