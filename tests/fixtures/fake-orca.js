@@ -22,53 +22,14 @@ function clone(x) {
   return JSON.parse(JSON.stringify(x));
 }
 
-function publicMessage(m) {
-  const out = {};
-  Object.keys(m).forEach((k) => {
-    if (k === "acked" || k === "uid" || k === "groupId") return;
-    out[k] = m[k];
-  });
-  if (out.deliveryId == null && m.groupId) out.deliveryId = m.groupId;
-  const folded = {};
-  if (typeof out.payload === "string" && out.payload) {
-    try {
-      const parsed = JSON.parse(out.payload);
-      if (parsed && typeof parsed === "object") Object.assign(folded, parsed);
-    } catch (_) {
-      /* keep folded empty; payload still rewritten below if keys exist */
-    }
-  } else if (out.payload && typeof out.payload === "object") {
-    Object.assign(folded, out.payload);
-  }
-  if (out.dispatchId) folded.dispatchId = folded.dispatchId || out.dispatchId;
-  if (out.dispatch_id) folded.dispatchId = folded.dispatchId || out.dispatch_id;
-  if (out.outcome) folded.outcome = folded.outcome || out.outcome;
-  if (out.taskId) folded.taskId = folded.taskId || out.taskId;
-  delete out.dispatchId;
-  delete out.dispatch_id;
-  delete out.outcome;
-  delete out.taskId;
-  if (Object.keys(folded).length) out.payload = JSON.stringify(folded);
-  else delete out.payload;
-  return out;
-}
-
 function seedMessages(list, acked, startUid) {
   const out = [];
   let uid = startUid;
   for (const d of list || []) {
     const groupId = d.deliveryId || null;
     for (const m of d.messages || []) {
-      const copy = Object.assign(clone(m), {
-        acked: Boolean(acked),
-        uid: uid,
-        groupId,
-      });
-      if (m.id === false || m.id === null) {
-        delete copy.id;
-      } else if (copy.id == null || copy.id === "") {
-        copy.id = "msg_" + uid;
-      }
+      const copy = Object.assign(clone(m), { acked: Boolean(acked), uid, groupId });
+      if (copy.id == null || copy.id === "") copy.id = "msg_" + uid;
       uid++;
       out.push(copy);
     }
@@ -77,11 +38,20 @@ function seedMessages(list, acked, startUid) {
 }
 
 function initialMailbox() {
-  const seeded = seedMessages(scenario.history || scenario.ackedDeliveries || [], true, 1);
   const groups = scenario.deliveries || [];
-  const first = groups[0] ? seedMessages([groups[0]], false, seeded.nextUid) : { messages: [], nextUid: seeded.nextUid };
+  if (scenario.peekMessages) {
+    const peek = seedMessages([{ deliveryId: null, messages: scenario.peekMessages }], false, 1);
+    return {
+      arrived: peek.messages,
+      pending: groups,
+      nextUid: peek.nextUid,
+      nextDeliverySeq: 1,
+      frozen: null,
+    };
+  }
+  const first = groups[0] ? seedMessages([groups[0]], false, 1) : { messages: [], nextUid: 1 };
   return {
-    arrived: seeded.messages.concat(first.messages),
+    arrived: first.messages,
     pending: groups.slice(1),
     nextUid: first.nextUid,
     nextDeliverySeq: 1,
@@ -96,14 +66,11 @@ function loadState() {
     const mailbox = initialMailbox();
     return Object.assign(
       {
-        terminalCreatedAt: null,
-        stopped: {},
         acked: [],
-        boundRun: scenario.currentRun || null,
-        createdRuns: [],
-        dynamicWorkers: [],
         workerStartCount: 0,
-        tasks: [],
+        readCount: {},
+        waiter: null,
+        stopped: [],
         released: [],
       },
       mailbox
@@ -120,16 +87,8 @@ function parseArgv(argv) {
   const flags = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--json") {
-      flags.json = true;
-      continue;
-    }
-    if (a === "--wait") {
-      flags.wait = true;
-      continue;
-    }
-    if (a === "--peek") {
-      flags.peek = true;
+    if (a === "--json" || a === "--wait" || a === "--peek") {
+      flags[a.slice(2)] = true;
       continue;
     }
     if (a.startsWith("--")) {
@@ -157,91 +116,8 @@ function ok(result) {
   reply({ ok: true, result: result || {} }, 0);
 }
 
-function nowMs() {
-  return Date.now();
-}
-
-function utcStamp(ms) {
-  const d = new Date(ms == null ? Date.now() : ms);
-  const p = (n) => String(n).padStart(2, "0");
-  return (
-    d.getUTCFullYear() +
-    "-" +
-    p(d.getUTCMonth() + 1) +
-    "-" +
-    p(d.getUTCDate()) +
-    " " +
-    p(d.getUTCHours()) +
-    ":" +
-    p(d.getUTCMinutes()) +
-    ":" +
-    p(d.getUTCSeconds())
-  );
-}
-
-function dispatchedAtOf(w, state) {
-  if (w && w.dispatchedAt) return w.dispatchedAt;
-  if (scenario.dispatchedAt) return scenario.dispatchedAt;
-  const id = (w && w.dispatchId) || "";
-  state.dispatchedAt = state.dispatchedAt || {};
-  if (!state.dispatchedAt[id]) state.dispatchedAt[id] = utcStamp();
-  return state.dispatchedAt[id];
-}
-
-function lastOutputAt(state) {
-  const busy = scenario.changeLastOutputForMs || 0;
-  if (busy) {
-    const created = state.terminalCreatedAt || nowMs();
-    if (nowMs() - created < busy) return nowMs();
-    return created + busy;
-  }
-  const spec = scenario.lastOutputAt || "now";
-  if (spec === "stale") return nowMs() - (scenario.staleMs || 200000);
-  if (typeof spec === "number") return spec;
-  return nowMs();
-}
-
-function isAdopted(w) {
-  const resource = (w && w.resource) || {};
-  return Boolean(
-    w &&
-      (w.ownershipState === "external" ||
-        w.retainedReason === "external_terminal" ||
-        resource.ownershipState === "external" ||
-        resource.retainedReason === "external_terminal")
-  );
-}
-
-function workers(state) {
-  const base = (scenario.workers || []).map((w) => Object.assign({}, w));
-  const extra = (state.dynamicWorkers || []).filter(
-    (w) => !base.some((b) => b.dispatchId === w.dispatchId)
-  );
-  return base.concat(extra).map((w) => {
-    const copy = Object.assign({}, w);
-    const stopKind = state.stopped[w.dispatchId];
-    if (stopKind === "adopt") {
-      copy.workerState = "stop_unknown";
-      copy.terminalState = "retained";
-      copy.projection = Object.assign({}, copy.projection, {
-        liveness: { verdict: "exited" },
-      });
-    } else if (stopKind) {
-      copy.dispatchStatus = "failed";
-      copy.workerState = "stopped";
-      copy.stage = { detail: "process_stopped" };
-      copy.terminalState = "retained";
-      copy.projection = Object.assign({}, copy.projection, {
-        liveness: { verdict: "exited" },
-      });
-    }
-    if ((state.released || []).indexOf(w.dispatchId) >= 0) {
-      copy.terminalState = "released";
-    } else if (!copy.terminalState && copy.dispatchStatus === "failed") {
-      copy.terminalState = "reclaimable";
-    }
-    return copy;
-  });
+function fail(message) {
+  reply({ ok: false, error: { message } }, 1);
 }
 
 const { positional, flags } = parseArgv(process.argv.slice(2));
@@ -249,246 +125,100 @@ const group = positional[0];
 const cmd = positional[1];
 const state = loadState();
 
-if (group === "orchestration" && cmd === "run-list") {
-  if (positional.length > 2) {
-    saveState(state);
-    reply(
-      { ok: false, error: { message: `Unknown command: orchestration run-list ${positional.slice(2).join(" ")}` } },
-      1
-    );
-  }
-  if (scenario.runListFailCursor != null && String(flags.cursor || "") === String(scenario.runListFailCursor)) {
-    saveState(state);
-    reply({ ok: false, error: { message: scenario.runListFailReason || "run-list failed" } }, 1);
-  }
-  const all = (scenario.runs || []).concat(state.createdRuns || []);
-  const limit = Number(flags.limit || 100);
-  const offset = flags.cursor ? Number(flags.cursor) || 0 : 0;
-  const slice = all.slice(offset, offset + limit);
-  const nextCursor = offset + limit < all.length ? String(offset + limit) : null;
-  saveState(state);
-  ok({ runs: slice, nextCursor });
-}
-
-if (group === "orchestration" && cmd === "task-list") {
-  const run =
-    (scenario.runs || []).find((r) => r.id === flags.run) ||
-    (state.createdRuns || []).find((r) => r.id === flags.run) ||
-    {};
-  const tasks = (run.tasks || []).concat(
-    (state.tasks || []).filter((t) => !flags.run || t.runId === flags.run || !t.runId)
-  );
-  saveState(state);
-  ok({ runId: flags.run, tasks, count: tasks.length });
-}
-
-if (group === "orchestration" && cmd === "run-current") {
-  saveState(state);
-  ok({ run: state.boundRun ? { id: state.boundRun } : null });
-}
-
-if (group === "orchestration" && cmd === "run-create") {
-  if (scenario.runCreateNoId) {
-    saveState(state);
-    ok({ run: {} });
-  }
-  const id = scenario.createdRunId || "run_verify";
-  state.boundRun = id;
-  const run = {
-    id,
-    objective: flags.objective || "",
-    created_at: "2026-09-11T10:00:00Z",
-    coordinator_handle: scenario.coordinatorHandle || "term_ctrl",
-    tasks: [],
-  };
-  state.createdRuns = (state.createdRuns || []).concat([run]);
-  saveState(state);
-  ok({ run: { id, objective: run.objective, coordinator_handle: run.coordinator_handle }, id });
-}
-
-if (group === "orchestration" && cmd === "run-use") {
-  state.boundRun = flags.id || null;
-  saveState(state);
-  ok({ run: state.boundRun ? { id: state.boundRun } : null });
-}
-
-if (group === "orchestration" && cmd === "task-create") {
-  const id = "task_verdict";
-  const task = {
-    id,
-    taskId: id,
-    task_title: flags["task-title"] || "",
-    spec: flags.spec || "",
-    runId: flags.run || "",
-    status: "pending",
-    result: null,
-  };
-  state.tasks = (state.tasks || []).concat([task]);
-  saveState(state);
-  ok({ task: { id }, taskId: id, id });
-}
-
-if (group === "orchestration" && cmd === "task-update") {
-  const task = (state.tasks || []).find((t) => t.id === flags.id) || {
-    id: flags.id,
-  };
-  task.status = flags.status || task.status;
-  task.result = flags.result != null ? flags.result : task.result;
-  task.runId = flags.run || task.runId;
-  state.tasks = (state.tasks || []).filter((t) => t.id !== flags.id).concat([task]);
-  saveState(state);
-  ok({ task });
-}
-
-if (group === "orchestration" && cmd === "worker-release") {
-  const current = workers(state).find((row) => row.dispatchId === flags.dispatch) || {};
-  const refuseIds = scenario.releaseRefuseIds || [];
-  if (isAdopted(current) || refuseIds.indexOf(flags.dispatch) >= 0) {
-    saveState(state);
-    reply({ ok: false, error: { message: "worker-release refused" } }, 1);
-  }
-  if (current.releaseReceipt === "retained" || scenario.releaseState === "retained") {
-    saveState(state);
-    ok({ dispatchId: flags.dispatch, state: "retained", processAction: "none" });
-  }
-  state.released = (state.released || []).concat([flags.dispatch]);
-  saveState(state);
-  ok({ dispatchId: flags.dispatch, state: "released", processAction: "none" });
-}
-
 if (group === "orchestration" && cmd === "worker-start") {
   const queue = scenario.workerStarts || (scenario.workerStart ? [scenario.workerStart] : null);
   const ws = (queue && queue[state.workerStartCount || 0]) ||
-    (queue && queue[queue.length - 1]) || {
-      dispatchId: "disp_1",
-      state: "ready",
-      handle: "term_w",
-    };
+    (queue && queue[queue.length - 1]) || { dispatchId: "ctx_ab12" };
   state.workerStartCount = (state.workerStartCount || 0) + 1;
-  const handle = ws.handle || flags.terminal || "term_w";
-  if (ws.state !== "ready") {
+  if (ws.error) {
     saveState(state);
     reply(
-      {
-        ok: false,
-        result: {
-          dispatchId: ws.dispatchId || "",
-          state: ws.state,
-          worker: { agentTerminalHandle: handle },
-        },
-        error: { message: ws.reason || ws.state },
-      },
+      { ok: false, error: { message: ws.error }, result: { failedStage: ws.failedStage || "start" } },
       1
     );
   }
-  const adopted = Boolean(flags.terminal);
-  state.dynamicWorkers = (state.dynamicWorkers || []).concat([
-    {
-      dispatchId: ws.dispatchId,
-      dispatchStatus: "dispatched",
-      agentTerminalHandle: handle,
-      lastHeartbeatAt: null,
-      terminalState: adopted ? "retained" : undefined,
-      retainedReason: adopted ? "external_terminal" : undefined,
-      ownershipState: adopted ? "external" : undefined,
-    },
-  ]);
   saveState(state);
-  ok({
-    dispatchId: ws.dispatchId,
-    state: "ready",
-    worker: { agentTerminalHandle: handle },
-  });
+  ok({ dispatchId: ws.dispatchId });
 }
 
-if (group === "orchestration" && cmd === "worker-show") {
-  const id = flags.dispatch;
-  const w = workers(state).find((row) => row.dispatchId === id) || {};
-  const ws = scenario.workerStart || {};
-  const dispatchedAt = dispatchedAtOf(w, state);
-  const lastError = w.lastError || null;
+if (group === "orchestration" && cmd === "worker-stop") {
+  state.stopped = (state.stopped || []).concat([flags.dispatch]);
   saveState(state);
-  ok({
-    dispatch: {
-      id,
-      lastFailure: w.lastFailure || ws.lastFailure || null,
-      lastHeartbeatAt: w.lastHeartbeatAt || null,
-      dispatchedAt,
-      status: w.dispatchStatus || "dispatched",
-      lastError,
-    },
-    worker: {
-      state: w.workerState || w.state || "ready",
-      stage: w.stage || "",
-      lastError,
-      agentTerminalHandle: w.agentTerminalHandle || ws.handle || "",
-    },
-    projection: w.projection || { liveness: { verdict: scenario.liveness || "live" } },
-  });
+  ok({ dispatchId: flags.dispatch });
+}
+
+if (group === "orchestration" && cmd === "worker-release") {
+  state.released = (state.released || []).concat([flags.dispatch]);
+  saveState(state);
+  ok({ dispatchId: flags.dispatch });
 }
 
 if (group === "orchestration" && cmd === "worker-list") {
-  if (scenario.workerListError) {
-    saveState(state);
-    reply({ ok: false, error: { message: scenario.workerListError } }, 1);
-  }
-  if (scenario.workerListMalformed) {
-    saveState(state);
-    process.stdout.write(String(scenario.workerListMalformed) + "\n");
-    process.exit(0);
-  }
   saveState(state);
   ok({
-    workers: workers(state).map((w) => ({
+    workers: (scenario.workers || []).map((w) => ({
       dispatchId: w.dispatchId,
       dispatchStatus: w.dispatchStatus,
-      agentTerminalHandle: w.agentTerminalHandle,
-      lastHeartbeatAt: w.lastHeartbeatAt || null,
-      terminalState: w.terminalState,
-      retainedReason: w.retainedReason,
-      ownershipState: w.ownershipState,
-      resource: w.resource,
-      workerState: w.workerState,
-      stage: w.stage,
-      projection: w.projection || { liveness: { verdict: scenario.liveness || "live" } },
+      projection: {
+        attention: (w.projection && w.projection.attention) || {},
+        liveness: (w.projection && w.projection.liveness) || {},
+        nextAction: (w.projection && w.projection.nextAction) || null,
+      },
     })),
   });
 }
 
-if (group === "orchestration" && cmd === "worker-stop") {
-  const current = workers(state).find((row) => row.dispatchId === flags.dispatch) || {};
-  const adopted = isAdopted(current);
-  state.stopped[flags.dispatch] = adopted ? "adopt" : "agent";
+if (group === "orchestration" && cmd === "worker-read") {
+  const id = flags.dispatch || "";
+  const n = (state.readCount[id] || 0) + 1;
+  state.readCount[id] = n;
+  const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
+  let transcript;
+  if (spec.advance) {
+    transcript = {
+      nextCursor: "c" + n,
+      limited: false,
+      returnedMessageCount: n === 1 || flags.cursor ? 2 : 0,
+    };
+  } else {
+    transcript = {
+      nextCursor: spec.nextCursor || null,
+      limited: Boolean(spec.limited),
+      returnedMessageCount: spec.returnedMessageCount || 0,
+    };
+  }
   saveState(state);
-  ok({ dispatchId: flags.dispatch, state: adopted ? "stop_unknown" : "stopped" });
+  ok({ transcript });
 }
 
-function peekMessages(st) {
-  const frozenUids = {};
-  if (st.frozen) {
-    for (const uid of st.frozen.uids || []) frozenUids[uid] = true;
-  }
-  return (st.arrived || []).filter((m) => !m.acked && !frozenUids[m.uid]);
+if (group === "orchestration" && cmd === "run-show") {
+  saveState(state);
+  ok({
+    run: {
+      coordinator_handle: scenario.coordinatorHandle || null,
+    },
+  });
+}
+
+function publicMessage(m) {
+  const out = { id: m.id, type: m.type, from_handle: m.from_handle, subject: m.subject, body: m.body };
+  if (m.payload != null) out.payload = typeof m.payload === "string" ? m.payload : JSON.stringify(m.payload);
+  Object.keys(out).forEach((k) => {
+    if (out[k] == null) delete out[k];
+  });
+  return out;
 }
 
 function unackedOf(st) {
   return (st.arrived || []).filter((m) => !m.acked);
 }
 
-function typesMatch(messages, types) {
-  if (!types) return true;
-  const wanted = String(types)
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  if (!wanted.length) return true;
-  return (messages || []).some((m) => m && wanted.indexOf(m.type) >= 0);
-}
-
 function nextBatch(st) {
   const unread = unackedOf(st);
   if (!unread.length) return [];
-  return unread.slice(0, 50);
+  const gid = unread[0].groupId;
+  if (gid == null) return [unread[0]];
+  return unread.filter((m) => m.groupId === gid).slice(0, 50);
 }
 
 function freezeBatch(st, batch) {
@@ -519,11 +249,11 @@ function waitSleep() {
 }
 
 if (group === "orchestration" && cmd === "check") {
+  if (scenario.checkError) {
+    saveState(state);
+    fail(scenario.checkError);
+  }
   if (flags.ack) {
-    if (scenario.rejectAck) {
-      saveState(state);
-      reply({ ok: false, error: { message: scenario.rejectAckReason || "ack rejected" } }, 1);
-    }
     if (state.frozen && state.frozen.deliveryId === flags.ack) {
       const uids = {};
       for (const uid of state.frozen.uids || []) uids[uid] = true;
@@ -540,19 +270,18 @@ if (group === "orchestration" && cmd === "check") {
     ok({ deliveryId: null, messages: [], acknowledged: flags.ack });
   }
   if (flags.peek) {
-    const messages = peekMessages(state).map(publicMessage);
+    const messages = unackedOf(state).map(publicMessage);
     saveState(state);
     ok({ deliveryId: null, messages, count: messages.length });
   }
-  if (flags.all) {
-    const raw = (state.arrived || []).filter((m) => !scenario.checkAllAckedOnly || m.acked);
-    const messages = raw.map(publicMessage);
+  if (flags.wait) {
+    const pid = String(process.pid);
+    if (state.waiter && state.waiter !== pid) {
+      saveState(state);
+      fail("a waiter is already active on this Run");
+    }
+    state.waiter = pid;
     saveState(state);
-    ok({ deliveryId: null, messages, count: messages.length });
-  }
-  if (scenario.checkFailConsume) {
-    saveState(state);
-    reply({ ok: false, error: { message: scenario.checkFailConsume } }, 1);
   }
   let msgs;
   if (state.frozen) {
@@ -560,89 +289,28 @@ if (group === "orchestration" && cmd === "check") {
   } else {
     const batch = nextBatch(state);
     if (!batch.length) {
-      msgs = [];
-    } else if (flags.wait && !typesMatch(unackedOf(state), flags.types)) {
-      waitSleep();
+      if (flags.wait) waitSleep();
+      if (flags.wait) state.waiter = null;
       saveState(state);
-      ok({ deliveryId: null, messages: [], count: 0, timedOut: true });
-    } else {
-      freezeBatch(state, batch);
-      msgs = frozenMessages(state);
+      ok({ deliveryId: null, messages: [], count: 0, timedOut: Boolean(flags.wait) });
     }
+    freezeBatch(state, batch);
+    msgs = frozenMessages(state);
   }
-  if (state.frozen) {
-    if (flags.wait && !typesMatch(unackedOf(state), flags.types)) {
-      waitSleep();
-      saveState(state);
-      ok({ deliveryId: null, messages: [], count: 0, timedOut: true });
-    }
-    saveState(state);
-    ok({ deliveryId: state.frozen.deliveryId, messages: msgs.map(publicMessage), count: msgs.length });
-  }
-  if (flags.wait) waitSleep();
+  if (flags.wait) state.waiter = null;
   saveState(state);
-  ok({ deliveryId: null, messages: [], count: 0, timedOut: Boolean(flags.wait) });
-}
-
-if (group === "orchestration" && cmd === "send") {
-  const uid = state.nextUid || 1;
-  const msg = {
-    id: "msg_" + uid,
-    type: flags.type || "status",
-    from_handle: flags.from || "",
-    subject: flags.subject || "",
-    body: flags.body || "",
-    acked: false,
-    uid,
-    groupId: null,
-  };
-  const payload = {};
-  if (flags["dispatch-id"]) payload.dispatchId = flags["dispatch-id"];
-  if (flags.outcome) payload.outcome = flags.outcome;
-  if (flags["task-id"]) payload.taskId = flags["task-id"];
-  if (Object.keys(payload).length) msg.payload = JSON.stringify(payload);
-  state.nextUid = uid + 1;
-  state.arrived = (state.arrived || []).concat([msg]);
-  saveState(state);
-  ok({ ok: true, subject: flags.subject || "" });
+  ok({ deliveryId: state.frozen.deliveryId, messages: msgs.map(publicMessage), count: msgs.length });
 }
 
 if (group === "terminal" && cmd === "create") {
-  state.terminalCreatedAt = nowMs();
-  const handle = scenario.terminalHandle || "term_w";
   saveState(state);
-  ok({ terminal: { handle } });
+  ok({ terminal: { handle: scenario.terminalHandle || "term_w" } });
 }
 
-if (group === "terminal" && cmd === "show") {
-  if (scenario.terminalShow === "fail") {
-    saveState(state);
-    reply({ ok: false, error: { message: scenario.terminalShowReason || "terminal show failed" } }, 1);
-  }
-  if (scenario.terminalShow === "malformed") {
-    saveState(state);
-    process.stdout.write("{not-json\n");
-    process.exit(0);
-  }
+if (group === "terminal" && cmd === "send") {
   saveState(state);
-  ok({ terminal: { handle: flags.terminal, lastOutputAt: lastOutputAt(state), running: true } });
-}
-
-if (group === "terminal" && cmd === "wait") {
-  saveState(state);
-  ok({ wait: { satisfied: true, for: flags.for || "tui-idle" } });
-}
-
-if (group === "terminal" && cmd === "close") {
-  saveState(state);
-  ok({ terminal: { handle: flags.terminal, closed: true } });
-}
-
-if (group === "terminal" && cmd === "read") {
-  saveState(state);
-  const tail = scenario.screenTail || [];
-  ok({ terminal: { handle: flags.terminal, tail: Array.isArray(tail) ? tail : [String(tail)] } });
+  ok({ terminal: { handle: flags.terminal, sent: true } });
 }
 
 saveState(state);
-reply({ ok: false, error: { message: `unhandled ${positional.join(" ")}` } }, 1);
+fail("unhandled " + positional.join(" "));
