@@ -435,7 +435,7 @@ test("5 STALLED when cursor is unchanged; advancing cursor is not STALLED", () =
   });
   assert.equal(term.status, 7, term.stdout);
   assert.match(term.stdout, /DEADLINE/);
-  assert.equal(/STALLED/.test(term.stdout), false, "terminal latestCursor progress must not stall");
+  assert.equal(/STALLED/.test(term.stdout), false, "terminal nextCursor progress must not stall");
 });
 
 test("5 STALLED names worker-read error for an open dispatch", () => {
@@ -820,14 +820,27 @@ function assertReadBeforeRelease(log, id) {
   });
   assert.ok(lastRead >= 0, "must worker-read " + id);
   assert.ok(firstRelease >= 0, "must worker-release " + id);
-  assert.ok(lastRead < firstRelease, "worker-read after release returns nothing: read=" + lastRead + " release=" + firstRelease);
+  assert.ok(lastRead < firstRelease, "must worker-read before release (live may still return an archived tail): read=" + lastRead + " release=" + firstRelease);
 }
 
-const signedOutStream = {
-  source: "stream",
+function liveMsg(text, extra) {
+  extra = extra || {};
+  return {
+    id: extra.id || "msg_1",
+    role: extra.role || "assistant",
+    blocks: extra.blocks || [{ type: "text", text: text }],
+    timestamp: extra.timestamp || "2026-09-14T07:00:00.000Z",
+    source: extra.source || "hook",
+  };
+}
+
+const signedOutTerminal = {
+  source: "terminal",
   terminal: {
+    handle: "term_w",
+    status: "running",
     tail: ["", SIGNED_OUT, ""],
-    latestCursor: "t0",
+    truncated: false,
     nextCursor: "t0",
     returnedLineCount: 3,
   },
@@ -836,7 +849,7 @@ const signedOutStream = {
 test("failure text quotes terminal tail before release on PREFLIGHT FAIL and NO_ACK", () => {
   const pf = setup(DEFAULT_AGENTS, {
     workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
-    workerRead: signedOutStream,
+    workerRead: signedOutTerminal,
   });
   const pre = runDely(["preflight", "--repo", pf.repo, "--run", "run_1"], pf, {
     DELY_ACK_S: "1",
@@ -854,7 +867,7 @@ test("failure text quotes terminal tail before release on PREFLIGHT FAIL and NO_
   const nack = setup(DEFAULT_AGENTS, {
     workerStarts: [{ dispatchId: "ctx_ab12" }],
     peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ffff") }],
-    workerRead: signedOutStream,
+    workerRead: signedOutTerminal,
   });
   const r = runDely(
     ["dispatch", "--repo", nack.repo, "--run", "run_1", "--phase", "implement", "--spec-file", "task.md"],
@@ -867,7 +880,7 @@ test("failure text quotes terminal tail before release on PREFLIGHT FAIL and NO_
   assertReadBeforeRelease(readLog(nack.logPath), "ctx_ab12");
 });
 
-test("5 STALLED only for transcript; terminal stream reaches DEADLINE however idle", () => {
+test("5 STALLED only for transcript; terminal source reaches DEADLINE however idle", () => {
   const workers = [
     {
       dispatchId: "ctx_idle",
@@ -879,35 +892,37 @@ test("5 STALLED only for transcript; terminal stream reaches DEADLINE however id
       },
     },
   ];
-  const movingStream = setup(DEFAULT_AGENTS, {
+  const movingTerm = setup(DEFAULT_AGENTS, {
     workers,
-    workerRead: { source: "stream", terminalAdvance: true, tail: [SIGNED_OUT] },
+    workerRead: { source: "terminal", terminalAdvance: true, tail: [SIGNED_OUT] },
   });
-  const moving = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], movingStream, {
+  const moving = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.08"], movingTerm, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(moving.status, 7, moving.stdout);
   assert.match(moving.stdout, /DEADLINE/);
   assert.equal(/STALLED/.test(moving.stdout), false, "advancing terminal cursor must not stall");
 
-  const idleStream = setup(DEFAULT_AGENTS, {
+  const idleTerm = setup(DEFAULT_AGENTS, {
     workers,
     workerRead: {
-      source: "stream",
+      source: "terminal",
       terminal: {
+        handle: "term_w",
+        status: "running",
         tail: ["", SIGNED_OUT],
-        latestCursor: "t0",
+        truncated: false,
         nextCursor: "t0",
         returnedLineCount: 2,
       },
     },
   });
-  const idle = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], idleStream, {
+  const idle = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], idleTerm, {
     SPAWN_TIMEOUT_MS: 15000,
   });
   assert.equal(idle.status, 7, idle.stdout);
   assert.match(idle.stdout, /DEADLINE/);
-  assert.equal(/STALLED/.test(idle.stdout), false, "terminal-stream dispatch never yields STALLED");
+  assert.equal(/STALLED/.test(idle.stdout), false, "terminal source never yields STALLED");
 
   const frozenTx = setup(DEFAULT_AGENTS, {
     workers,
@@ -916,7 +931,7 @@ test("5 STALLED only for transcript; terminal stream reaches DEADLINE however id
       nextCursor: "c0",
       limited: false,
       returnedMessageCount: 0,
-      messages: [{ text: SIGNED_OUT }],
+      messages: [liveMsg(SIGNED_OUT)],
     },
   });
   const stalled = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], frozenTx, {
@@ -925,12 +940,45 @@ test("5 STALLED only for transcript; terminal stream reaches DEADLINE however id
   assert.equal(stalled.status, 6, stalled.stdout);
   assert.match(stalled.stdout, /STALLED ctx_idle/);
   assertQuotedScreen(stalled.stdout, SIGNED_OUT);
+
+  const toolOnly = setup(DEFAULT_AGENTS, {
+    workers,
+    workerRead: {
+      source: "transcript",
+      nextCursor: "c0",
+      limited: false,
+      returnedMessageCount: 0,
+      messages: [
+        liveMsg("older text that must not win"),
+        liveMsg("", {
+          id: "msg_2",
+          blocks: [
+            { type: "tool-call", name: "Shell", input: { command: "true" } },
+            { type: "tool-result", output: SIGNED_OUT, isError: true },
+          ],
+        }),
+      ],
+    },
+  });
+  const toolStalled = runDely(["wait", "--run", "run_1", "--stall-min", "0.02", "--timeout-min", "0.15"], toolOnly, {
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(toolStalled.status, 6, toolStalled.stdout);
+  assert.match(toolStalled.stdout, /STALLED ctx_idle/);
+  assertQuotedScreen(toolStalled.stdout, SIGNED_OUT);
+  assert.equal(/older text that must not win/.test(lastOutput(toolStalled.stdout)), false);
+});
+
+test("DELY_PREFLIGHT_S defaults to 150", () => {
+  const src = fs.readFileSync(DELY_JS, "utf8");
+  assert.match(src, /seconds\(process\.env\.DELY_PREFLIGHT_S,\s*150\)/);
+  assert.equal(/seconds\(process\.env\.DELY_PREFLIGHT_S,\s*90\)/.test(src), false);
 });
 
 test("9 preflight worker_done budget uses DELY_PREFLIGHT_S not DELY_ACK_S", () => {
   const ctx = setup(DEFAULT_AGENTS, {
     workerStarts: [{ dispatchId: "ctx_aa11" }, { dispatchId: "ctx_bb22" }],
-    workerRead: signedOutStream,
+    workerRead: signedOutTerminal,
   });
   const t0 = Date.now();
   const r = runDely(["preflight", "--repo", ctx.repo, "--run", "run_1"], ctx, {

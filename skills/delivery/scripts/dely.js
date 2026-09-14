@@ -133,10 +133,17 @@ function clip(s) {
 function messageText(m) {
   if (m == null) return "";
   if (typeof m === "string") return m;
-  if (typeof m.text === "string") return m.text;
-  if (typeof m.content === "string") return m.content;
-  if (typeof m.body === "string") return m.body;
-  return "";
+  const blocks = Array.isArray(m.blocks) ? m.blocks : [];
+  let last = "";
+  let toolOut = "";
+  for (const b of blocks) {
+    if (!b || typeof b !== "object") continue;
+    if (b.type === "text" && typeof b.text === "string" && b.text.trim()) last = b.text;
+    else if (!toolOut && b.type === "tool-result" && typeof b.output === "string" && b.output.trim()) {
+      toolOut = b.output;
+    }
+  }
+  return last || toolOut;
 }
 
 function lastText(id) {
@@ -253,7 +260,7 @@ function advance(track, id) {
     const res = r.result || {};
     if (res.source) t.source = res.source;
     const body = res.transcript || res.terminal || {};
-    const cursor = body.latestCursor || body.nextCursor || null;
+    const cursor = body.nextCursor || null;
     const n = Number(body.returnedMessageCount || body.returnedLineCount || 0);
     if (cursor && cursor !== t.cursor) t.at = Date.now();
     if (cursor) t.cursor = cursor;
@@ -326,7 +333,7 @@ function wait(f) {
     for (const w of rows.filter((w) => w.dispatchStatus === "dispatched")) {
       const idle = advance(track, w.dispatchId);
       const rec = track[w.dispatchId] || {};
-      if (!rec.error && rec.source === "stream") continue;
+      if (!rec.error && rec.source !== "transcript") continue;
       if (idle >= stallMin) {
         const why = rec.error ? rec.error : "no new output for " + Math.floor(idle) + " min";
         out(

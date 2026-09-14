@@ -170,10 +170,7 @@ if (group === "orchestration" && cmd === "worker-list") {
 
 if (group === "orchestration" && cmd === "worker-read") {
   const id = flags.dispatch || "";
-  if ((state.released || []).includes(id)) {
-    saveState(state);
-    ok({});
-  }
+  const released = (state.released || []).includes(id);
   const n = (state.readCount[id] || 0) + 1;
   state.readCount[id] = n;
   const spec = (scenario.workerRead && scenario.workerRead[id]) || scenario.workerRead || {};
@@ -182,17 +179,20 @@ if (group === "orchestration" && cmd === "worker-read") {
     fail(spec.error);
   }
   const term = spec.terminal || {};
-  const isStream = spec.source === "stream" || spec.terminalAdvance || spec.terminal;
-  if (isStream) {
-    const latest = spec.terminalAdvance ? "t" + n : term.latestCursor || spec.latestCursor || "t0";
+  const isTerminal =
+    spec.source === "terminal" || spec.terminalAdvance || (spec.terminal && spec.source !== "transcript");
+  if (isTerminal) {
+    const nextCursor = spec.terminalAdvance ? "t" + n : term.nextCursor || spec.nextCursor || "t0";
     const tail = term.tail || spec.tail || [];
     saveState(state);
-    ok({
-      source: "stream",
+    const result = {
+      source: "terminal",
       terminal: {
+        handle: term.handle || spec.handle || "term_w",
+        status: term.status || spec.status || "running",
         tail,
-        latestCursor: latest,
-        nextCursor: term.nextCursor || spec.nextCursor || latest,
+        truncated: Boolean(term.truncated || spec.truncated),
+        nextCursor,
         returnedLineCount:
           term.returnedLineCount != null
             ? term.returnedLineCount
@@ -200,7 +200,9 @@ if (group === "orchestration" && cmd === "worker-read") {
               ? spec.returnedLineCount
               : tail.length || 2,
       },
-    });
+    };
+    if (released) result.archived = true;
+    ok(result);
   }
   let transcript;
   if (spec.advance) {
@@ -219,7 +221,9 @@ if (group === "orchestration" && cmd === "worker-read") {
     };
   }
   saveState(state);
-  ok({ source: "transcript", transcript });
+  const result = { source: "transcript", transcript };
+  if (released) result.archived = true;
+  ok(result);
 }
 
 if (group === "orchestration" && cmd === "run-show") {
