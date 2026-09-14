@@ -120,6 +120,17 @@ Claude and Codex only, and Codex cannot report from it.
 - Control model quality is a precondition. Copilot's Free plan offers only Auto,
   and its Auto model once implemented the change itself instead of delivering it.
 - Proactive human notification is not provided.
+- **Known residual failures, none of them fixed.** Each was found in review of this delivery:
+  - A failed row that Orca reports with `nextAction.kind: none` (already released or
+    abandoned) produces no ATTENTION, so it surfaces only at `DEADLINE`.
+  - A `worker-read` error sticks: `STALLED` keeps naming it after a later read succeeds.
+  - The sleep between empty preflight polls is untested.
+  - `wait-bg` quotes its values with JSON, not shell quoting, so `$` or a backtick in a
+    Control-owned value would expand.
+  - The fake Orca's second-waiter refusal cannot trigger, because fake invocations run
+    one at a time.
+  - Two phases sharing one pin print a single PREFLIGHT line, under the first phase.
+  - The contracts rail against a `nudge` wake is lexical and case-sensitive.
 
 #### Non-goals
 
