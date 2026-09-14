@@ -373,6 +373,7 @@ function preflight(f) {
   const pollFailed = () => {
     const rows = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []);
     for (const [id, rec] of Object.entries(open)) {
+      if (rec.messaged) continue;
       const w = rows.find((x) => x.dispatchId === id);
       if (!w || w.dispatchStatus !== "failed") continue;
       const detail = ((w.projection || {}).stage || {}).detail || "failed";
@@ -444,7 +445,8 @@ function dispatch(f) {
   const s = start(f.repo, f.run, p, spec, f.phase);
   if (s.error) out("FAILED " + s.error, 5);
   const interval = Math.max(20, Math.min(5000, Math.floor(POLL_S * 1000)));
-  for (const t0 = Date.now(); Date.now() - t0 < ACK_S * 1000; sleep(interval)) {
+  const t0 = Date.now();
+  for (; Date.now() - t0 < ACK_S * 1000; sleep(interval)) {
     const peek = orca(["orchestration", "check", "--peek", "--run", f.run]);
     if (((peek.result || {}).messages || []).some((m) => namesDispatch(m, s.id))) out("DISPATCHED " + s.id, 0);
     const row = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).find((w) => w.dispatchId === s.id);
@@ -455,7 +457,7 @@ function dispatch(f) {
   orca(["orchestration", "worker-release", "--dispatch", s.id]);
   takeAdopt(f.run, s.id);
   closeCreated(s.createdHandle);
-  out("NO_ACK " + s.id + " stopped after " + ACK_S + "s; last output: " + why, 4);
+  out("NO_ACK " + s.id + " stopped after " + Math.round((Date.now() - t0) / 1000) + "s; last output: " + why, 4);
 }
 
 function advance(track, id) {

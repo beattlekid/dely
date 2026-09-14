@@ -1656,3 +1656,110 @@ test("failed worker-list row drops early and quotes the created terminal when wo
     /* none */
   }
 });
+
+test("preflight PASS on a failed worker-list row after ack heartbeat then worker_done", () => {
+  const pfRun = "run_agy_acked_failed_pf";
+  try {
+    fs.unlinkSync(adoptFile(pfRun));
+  } catch (_) {
+    /* none */
+  }
+  const pf = setup(AGY_ONLY, {
+    terminalHandle: "term_agy",
+    terminalShow: { busyShows: 2 },
+    terminalRead: { tail: ["ready"] },
+    workerStarts: [{ dispatchId: "ctx_aa11" }],
+    workers: [
+      {
+        dispatchId: "ctx_aa11",
+        dispatchStatus: "failed",
+        projection: {
+          stage: { detail: "agent_readiness" },
+          attention: {},
+          liveness: {},
+          nextAction: null,
+        },
+      },
+    ],
+    deliveries: [
+      {
+        deliveryId: "dv_ack",
+        messages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_aa11") }],
+      },
+      {
+        deliveryId: "dv_done",
+        messages: [{ type: "worker_done", payload: payload("ctx_aa11") }],
+      },
+    ],
+  });
+  const pre = runDely(["preflight", "--repo", pf.repo, "--run", pfRun], pf, {
+    DELY_PREFLIGHT_S: "4",
+    SPAWN_TIMEOUT_MS: 15000,
+  });
+  assert.equal(pre.status, 0, pre.stderr + pre.stdout);
+  assert.match(pre.stdout, /PREFLIGHT implement antigravity PASS /);
+  assert.equal(/FAIL worker failed/.test(pre.stdout), false, pre.stdout);
+  const agyCloses = closes(readLog(pf.logPath)).filter((argv) => hasFlagPair(argv, "--terminal", "term_agy"));
+  assert.equal(agyCloses.length, 1, "PASS must close the created terminal once: " + JSON.stringify(agyCloses));
+  assert.equal(fs.existsSync(adoptFile(pfRun)), false);
+});
+
+test("dispatch prints DISPATCHED when an ACK and a failed row are both present", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    peekMessages: [{ type: "heartbeat", subject: "ack", payload: payload("ctx_ab12") }],
+    workers: [
+      {
+        dispatchId: "ctx_ab12",
+        dispatchStatus: "failed",
+        projection: {
+          stage: { detail: "agent_readiness" },
+          attention: {},
+          liveness: {},
+          nextAction: null,
+        },
+      },
+    ],
+  });
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_ack_failed", "--phase", "implement", "--spec-file", "task.md"],
+    ctx
+  );
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.match(r.stdout, /^DISPATCHED ctx_ab12$/m);
+  assert.equal(/NO_ACK/.test(r.stdout), false, "ACK must win over a failed row: " + r.stdout);
+});
+
+test("NO_ACK on a failed row reports the seconds actually waited, not ACK_S", () => {
+  const ctx = setup(DEFAULT_AGENTS, {
+    workerStarts: [{ dispatchId: "ctx_ab12" }],
+    workers: [
+      {
+        dispatchId: "ctx_ab12",
+        dispatchStatus: "failed",
+        projection: {
+          stage: { detail: "agent_readiness" },
+          attention: {},
+          liveness: {},
+          nextAction: null,
+        },
+      },
+    ],
+  });
+  const t0 = Date.now();
+  const r = runDely(
+    ["dispatch", "--repo", ctx.repo, "--run", "run_nack_elapsed", "--phase", "implement", "--spec-file", "task.md"],
+    ctx,
+    { DELY_ACK_S: "8", SPAWN_TIMEOUT_MS: 15000 }
+  );
+  const elapsedS = (Date.now() - t0) / 1000;
+  assert.equal(r.status, 4, r.stderr + r.stdout);
+  const m = r.stdout.match(/^NO_ACK ctx_ab12 stopped after (\d+)s; last output: /m);
+  assert.ok(m, "line shape must stay NO_ACK <id> stopped after <s>s; last output: <text>: " + r.stdout);
+  const reported = Number(m[1]);
+  assert.notEqual(reported, 8, "must report elapsed seconds, not ACK_S: " + r.stdout);
+  assert.ok(
+    reported <= Math.ceil(elapsedS),
+    "reported wait must be the seconds actually waited: reported=" + reported + " elapsed=" + elapsedS + "s " + r.stdout
+  );
+});
