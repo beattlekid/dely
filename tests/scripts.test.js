@@ -791,3 +791,18 @@ test("8 notify gives up on a lasting block and never sends without --enter", () 
     assert.equal(hasFlagPair(argv, "--text", "\r"), false, JSON.stringify(argv));
   }
 });
+
+test("8 notify falls back from a non-numeric retry interval and still gives up", () => {
+  const ctx = setup(DEFAULT_AGENTS, { coordinatorHandle: "term_new", sendEnterBlocked: true });
+  const outFile = path.join(ctx.repo, "wait.out");
+  const t0 = Date.now();
+  const r = runDely(["notify", "--run", "run_1", "--as", "term_old", "--out", outFile], ctx, {
+    DELY_NOTIFY_RETRY_S: "abc",
+    DELY_NOTIFY_GIVEUP_S: "0.15",
+    SPAWN_TIMEOUT_MS: 5000,
+  });
+  const elapsed = Date.now() - t0;
+  assert.notEqual(r.status, null, "must not hang on NaN retry: " + ((r.error && r.error.code) || r.stderr));
+  assert.notEqual(r.status, 0, "give-up must exit non-zero: " + r.stderr + r.stdout);
+  assert.ok(elapsed < 4000, "must exit within the scaled give-up, not the default retry: " + elapsed + "ms");
+});

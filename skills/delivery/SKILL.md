@@ -160,7 +160,8 @@ Usage as the launcher prints it:
   not in the worktree. The wake line names the full path of the output file to read
 - `dely notify --run <runId> --as <handle> --out <file>` types one line naming the output file and
   `--enter` into the Run's current `coordinator_handle`, falling back to `--as`.
-  If that send is blocked, it sends the same text without `--enter` and then a bare return
+  If that send is blocked, it retries the same `--enter` send every 30 s for up to 30 minutes
+  and never types without `--enter`; after giving up, the result file is left unread
 - unknown commands print `usage: dely preflight|dispatch|wait|wait-bg|notify`
   (exit 2)
 

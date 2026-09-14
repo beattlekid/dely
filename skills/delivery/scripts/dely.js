@@ -9,8 +9,9 @@ const path = require("path");
 const ACK_S = Number(process.env.DELY_ACK_S || 60);
 const POLL_S = Number(process.env.DELY_POLL_S || 15);
 const PROGRESS_S = Number(process.env.DELY_PROGRESS_S || 60);
-const NOTIFY_RETRY_S = Number(process.env.DELY_NOTIFY_RETRY_S || 30);
-const NOTIFY_GIVEUP_S = Number(process.env.DELY_NOTIFY_GIVEUP_S || 1800);
+const seconds = (v, d) => (Number.isFinite(+v) && +v > 0 ? +v : d);
+const NOTIFY_RETRY_S = seconds(process.env.DELY_NOTIFY_RETRY_S, 30);
+const NOTIFY_GIVEUP_S = seconds(process.env.DELY_NOTIFY_GIVEUP_S, 1800);
 
 function orca(args) {
   const bin = process.env.ORCA_CLI_COMMAND || "orca";
@@ -410,8 +411,9 @@ function notify(f) {
     if (r.ok !== false) return;
     const msg = (r.error && r.error.message) || "";
     if (!/agent_prompt_blocked/.test(msg)) return;
-    if (Date.now() - t0 >= giveUpMs) process.exit(1);
-    sleep(retryMs);
+    const left = giveUpMs - (Date.now() - t0);
+    if (left <= 0) process.exit(1);
+    sleep(Math.min(retryMs, left));
   }
 }
 
