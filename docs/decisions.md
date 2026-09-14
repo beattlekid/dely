@@ -151,6 +151,26 @@ Claude and Codex only, and Codex cannot report from it.
     for up to 30 minutes, then leaves the result file unread. A Control whose prompt
     stays unanswered that long is not woken.
 
+- **Amended 2026-09-14, after a re-probe of 397d4fd.** Background Controls (Claude Code,
+  Cursor, Copilot) and waker Controls (Codex, Antigravity, Grok) each delivered, and the
+  fault checks held. Six defects followed, and each is fixed:
+  - **Antigravity workers lost their prompt.** A plain `worker-start` typed it before the
+    TUI was ready, which was measured 0 of 4 on 2026-09-11. Dely again launches an
+    Antigravity worker in its own terminal, waits for output quiescence, then adopts it
+    with `worker-start --terminal`.
+  - **A Codex Control ran `dely wait` inside its own exec** and stalled when Codex reaped
+    it. `wait` now needs `--control`, and it refuses any harness whose Control wake is not
+    `background`.
+  - **A preflight failure line lost its cause:** it quoted the prompt preamble, not the
+    dialog. The quote now prefers screen lines that name a known gate.
+  - **A preflight on a gated pin always waited its full budget.** It now fails early when
+    a known gate line is still on screen on two consecutive polls.
+  - **A Control told the human to answer a released worker's dialog.** The skill now says
+    a preflight failure needs the human to run the harness once in a new terminal, then a
+    new preflight.
+  - **Grok Build 1.0.30 asks a y/n security question in a fresh repository,** so its
+    Setup cell is no longer `none`.
+
 #### Non-goals
 
 - Fixing Orca's nudge.
