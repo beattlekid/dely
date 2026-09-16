@@ -1,0 +1,194 @@
+# Live checklist
+
+This replaces the structural suite that Dely deleted in 0.19.0. A structural
+suite told us the files had the shape we last agreed on. It never told us a
+worker started, acknowledged, stalled, died, or hit a dialog. Everything that
+actually broke in the 0.18.0 series was found by running the real thing, so
+that is what is run now.
+
+A separate agent session runs this before a release, against a candidate
+installed for real. A human is needed for the first trust of each probe
+repository, and otherwise only when a row goes wrong.
+
+Dely itself never answers a harness dialog. `trust.sh` in this directory does,
+because a probe has to stand in for the human somewhere, and it is not part of
+the shipped skill. No skill references this directory.
+
+## Input
+
+- the candidate SHA;
+- Orca running, with orchestration enabled;
+- Claude Code, Codex CLI and Cursor Agent CLI installed and signed in;
+- `~/dely-probe/` writable. Both scripts here refuse every path outside it.
+
+Record the Orca version. A row that passed on one Orca build is not evidence
+about the next one: rows 1, 4 and 5 are worth rerunning after an Orca upgrade.
+
+## Step 1 — install the candidate from a snapshot
+
+Never point a harness at the working tree. Take a snapshot, install from it,
+and check what actually landed:
+
+```bash
+sha=<candidate SHA>
+snap=~/dely-probe/.snap-$sha
+rm -rf "$snap" && mkdir -p "$snap"
+git -C <checkout> archive "$sha" | tar -x -C "$snap"
+```
+
+Install from `$snap` with the commands the README gives, for Claude Code,
+Codex CLI and Cursor Agent CLI. Cursor reads the Claude plugin cache, which was
+measured during the 2026-09-14 probe rounds; confirm it rather than assuming it.
+
+Then verify by hash, at every location that can serve the skill:
+
+```bash
+shasum -a 256 "$snap/skills/delivery/SKILL.md"
+find ~/.claude/plugins ~/.claude/skills ~/.agents/skills ~/.codex ~/.cursor \
+  -name SKILL.md -path '*delivery*' -exec shasum -a 256 {} +
+```
+
+Every hash must match the snapshot. A copy with a different hash — including a
+symlink left behind by an older install — wins over the plugin and silently
+runs a different protocol. Stop and report rather than deleting someone's
+install: report the path and the hash and ask.
+
+**A harness reporting a successful install is not evidence.** Cursor once ran
+an old branch for ten merges while reporting success every time.
+
+## Step 2 — build the probe repositories
+
+```bash
+probe/mkrepo.sh r1 "Claude Code" claude-opus-5 medium "Codex CLI" <slug> <effort>
+probe/mkrepo.sh r2 "Codex CLI" <slug> <effort> "Cursor Agent CLI" <slug> default
+probe/mkrepo.sh r3 "Cursor Agent CLI" <slug> default "Claude Code" claude-opus-5 medium
+```
+
+The paths are fixed at `~/dely-probe/r1`, `r2` and `r3` so that a harness trust
+entry, which is keyed on the path, survives a rebuild. The first run needs a
+human to trust each harness at each path once; later runs need none. Take the
+model slugs from the harness's own discovery command, not from this file.
+
+## Step 3 — rows 1 to 3, the rotated deliveries
+
+For each repository, launch a Control and give it the delivery:
+
+```bash
+orca terminal create --worktree path:~/dely-probe/rN \
+  --command "<binary> <permission default>"
+```
+
+Wait for the harness to be idle, then send the Control prompt: use
+`dely:delivery` for the change described in `REQUEST.md`; the design contract
+is pre-approved as Bounded within `REQUEST.md`; stop only where the skill
+requires a human.
+
+Follow it with `orca orchestration run-list` filtered by `coordinator_handle`,
+`orca orchestration worker-list`, and `orca terminal read`, until the Control
+screen stops changing and no worker is `dispatched`.
+
+Collect: the SHA on the remote, the disposition in the handoff, how many times
+a human had to act and why, wall time, and per-phase time.
+
+**Pass:** the branch is on the remote, the review disposition is `ACCEPT`, and
+no human acted.
+
+Row 1 is the release floor. Rows 2 and 3 rotate which harness is Control,
+implementer and reviewer; run them when the release changes anything about a
+launch, and at least once per release series.
+
+## Step 4 — row 4, a worker that dies after it acknowledges
+
+Inside one of the rows above, after the implement worker has acknowledged, kill
+its agent process from outside Orca.
+
+**Pass:** Control reports `ATTENTION` within 30 s and dispatches the same task
+again exactly once.
+
+This is the row that catches a helper which prints `DISPATCHED` without ever
+waiting for the acknowledgement: such a helper passes row 1 whenever the worker
+happens to start, and fails here.
+
+## Step 5 — row 5, a pin that has not answered its dialog
+
+Use a path that no harness has trusted — a new directory each time, never
+`r1` to `r3` — with a Claude Code pin, and run `dely preflight` inside a Run.
+
+**Pass:** `PREFLIGHT … FAIL` in under 60 s, the printed `last output` contains
+the dialog text, and `orca terminal list` shows nothing left behind.
+
+The quote is the point, not the verdict. A failure that arrives on time with an
+empty quote tells the human nothing, and that is exactly how this failed before
+the launch-gate fix: 150 s and no cause.
+
+## Step 6 — row 6, a worker that goes quiet
+
+Dispatch a Claude Code worker whose spec is to acknowledge and then stay silent
+for ten minutes.
+
+**Pass:** `STALLED` at the configured threshold, with the idle minutes and the
+last output. Orca's own liveness reads `live` throughout; that is the condition
+this row exists for.
+
+Terminal workers are out of scope here: a redrawing TUI keeps the stream
+advancing, so their stall surfaces at `DEADLINE` instead.
+
+## Step 7 — row 7, the trust intervention loop
+
+This row checks the whole loop, not just the refusal: a delivery stops on an
+untrusted pin, a human trusts it, and the same Run continues to `ACCEPT`.
+
+Setup:
+
+- a path no harness has trusted, `~/dely-probe/t-<sha>`;
+- Control is Codex CLI or Cursor Agent CLI, **never Claude Code**, because
+  Claude's own startup dialog is the trust step: answering it would pre-trust
+  the path and the row would test nothing;
+- the `implement` pin is Claude Code.
+
+Steps and their pass conditions:
+
+1. Control starts the delivery and reaches its first preflight. **Pass:**
+   within 60 s Control has stopped on a message naming the harness, the path,
+   and what the human must do; `orca orchestration worker-list` shows the
+   preflight dispatch released; `orca terminal list` has no leftover terminal.
+2. Act as the human: `probe/trust.sh ~/dely-probe/t-<sha>`. It opens Claude in
+   an Orca terminal, answers the dialog, verifies
+   `projects[<path>].hasTrustDialogAccepted` in `~/.claude.json`, and closes
+   the terminal. **Pass:** it prints `TRUSTED`. On `NOT_TRUSTED`, stop and
+   call the human — do not loop.
+3. Send Control one line: `Đã trust Claude Code trong repo này. Chạy lại
+   preflight và tiếp tục.` followed by Enter. If Orca answers
+   `agent_prompt_blocked`, Control is holding a menu: send `\r` first, then the
+   text.
+4. **Pass:** the same Run gets a second preflight, it passes both pins, the
+   delivery reaches `ACCEPT`, the SHA is on the remote, and nothing else was
+   sent to Control.
+
+Ways of failing that this row separates from passing: failing at 150 s with an
+empty quote; telling the human to answer in a terminal that has already been
+released; opening a new Run or dispatching without preflighting again; and
+hanging because a batch was never acknowledged.
+
+**Leaves behind:** a trust entry for `t-<sha>` in `~/.claude.json` and a
+repository registered in Orca. Remove both by hand; Orca has no command for the
+second.
+
+## Step 8 — clean up
+
+- uninstall the candidate from all three harnesses;
+- delete the snapshot;
+- keep `r1` to `r3` so their trust entries survive;
+- remove the row 5 and row 7 paths, and their trust entries.
+
+## What this cannot see
+
+The deferred harnesses. Windows. A race between an acknowledgement and a
+replayed batch. A quota exhausted mid-run. A Control that skips a gate because
+the model was having a bad day. A shape change between two Orca releases, until
+the rows are run again.
+
+## Results
+
+Put the table in the pull request body: one line per row, with the verdict, the
+number, and what was left behind.
