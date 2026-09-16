@@ -51,23 +51,42 @@ function flags(argv) {
   return f;
 }
 
-const AGENTS = {
-  "Claude Code": "claude",
-  "Codex CLI": "codex",
-  "Cursor Agent CLI": "cursor",
-  "GitHub Copilot CLI": "copilot",
-  "Antigravity CLI": "antigravity",
-  "Grok Build": "grok",
-  "Kiro CLI": "kiro",
-};
+const HARNESSES_PATH = path.resolve(__dirname, "../../../harnesses.json");
+
+let _harnesses;
+function loadHarnesses() {
+  if (_harnesses) return _harnesses;
+  let raw;
+  try {
+    raw = fs.readFileSync(HARNESSES_PATH, "utf8");
+  } catch (e) {
+    out("ERROR cannot read " + HARNESSES_PATH + ": " + (e.message || e), 9);
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    out("ERROR cannot parse " + HARNESSES_PATH + ": " + (e.message || e), 9);
+  }
+  if (!data || !Array.isArray(data.harnesses)) {
+    out("ERROR " + HARNESSES_PATH + " has no harnesses array", 9);
+  }
+  _harnesses = data.harnesses;
+  return _harnesses;
+}
+
+function harnessById(id) {
+  return loadHarnesses().find((h) => h.id === id);
+}
 
 function pin(repo, phase) {
   const md = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
   const row = md.split("\n").find((l) => new RegExp("^\\|\\s*`?" + phase + "`?\\s*\\|").test(l));
   if (!row) throw new Error("no " + phase + " pin in AGENTS.md");
   const [, harness, model, effort] = row.split("|").slice(1).map((c) => c.trim().replace(/`/g, ""));
-  if (!AGENTS[harness]) throw new Error("unknown harness " + harness);
-  return { phase, agent: AGENTS[harness], model, effort };
+  const h = loadHarnesses().find((x) => x.name === harness);
+  if (!h) throw new Error("unknown harness " + harness);
+  return { phase, agent: h.id, model, effort, modelFlag: h.modelFlag, effortFlag: h.effortFlag };
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -75,15 +94,6 @@ const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
 };
-
-function harnessCell(agent, col) {
-  const md = fs.readFileSync(path.join(__dirname, "../references/harnesses.md"), "utf8");
-  for (const line of md.split("\n")) {
-    const c = line.split("|").map((x) => x.trim().replace(/`/g, ""));
-    if (c[2] === agent) return c[col] || "";
-  }
-  return "";
-}
 
 function start(repo, run, p, spec, title) {
   const args = [
@@ -100,10 +110,8 @@ function start(repo, run, p, spec, title) {
     "--agent",
     p.agent,
   ];
-  if (["claude", "codex", "cursor"].includes(p.agent)) {
-    if (p.model !== "default") args.push("--model", p.model);
-    if (p.effort !== "default") args.push("--effort", p.effort);
-  }
+  if (p.modelFlag && p.model !== "default") args.push("--model", p.model);
+  if (p.effortFlag && p.effort !== "default") args.push("--effort", p.effort);
   const r = orca(args);
   const id = r.result && r.result.dispatchId;
   if (!id) {
@@ -275,7 +283,7 @@ function advance(track, id) {
 }
 
 function wait(f) {
-  const wake = harnessCell(f.control, 6) || "unknown";
+  const wake = (harnessById(f.control) || {}).controlWake || "unknown";
   if (wake !== "background" && process.env.DELY_WAITER !== "1") {
     out("REFUSED " + f.control + " wakes by " + wake + "; use dely wait-bg", 3);
   }
