@@ -220,6 +220,19 @@ discovered by a dispatch returning `NO_ACK` rather than before the first
 dispatch. The cost is one wasted dispatch; the saving is one round trip on
 every delivery whose pins were already trusted, which is most of them.
 
+A hazard this delivery hit and did not fix: a Control that acknowledges a batch
+outside `dely wait` cannot use `orca orchestration check --peek` to decide
+whether anything is pending. `--peek` returns the messages but leaves
+`deliveryId` null, and only `check --wait` assigns one, so a drain loop keyed on
+`deliveryId` exits while a `worker_done` is still unacknowledged. The next
+`wait` then settles on that stale message, which is indistinguishable from the
+current worker finishing — it was caught here only by checking `worker-list`
+before acting on the result. Per-delivery Runs stop a stale report settling a
+different delivery's wait; nothing stops one settling a later wait in the same
+Run. The helper's own loop acks the `deliveryId` from `check --wait` and is not
+affected. Recorded rather than fixed because the fix belongs in the batch
+mechanics the orchestration guide owns, not in this delivery's scope.
+
 #### Non-goals
 
 Supporting the four deferred harnesses. Their measured facts are preserved in
@@ -1253,6 +1266,21 @@ it, and it changed the design:
   asserts that flag "does not suppress it" and tells Control to select an
   option that never appears — while the same cell warns that a bare Enter
   quits the worker. Acting on the stale instruction is actively harmful.
+
+  **This bullet's measurement was withdrawn on 2026-09-11 and is amended here
+  on 2026-09-16.** The probe ran in a git worktree of an already trusted
+  repository, and worktrees inherit Claude Code's trust, so no dialog was ever
+  going to appear. A fresh repository shows the dialog with `No, exit`
+  preselected even with the flag, reproduced on Claude Code 2.1.268. The
+  reasoning that followed from it — that the trust column enumerated a class it
+  could not finish enumerating — still stands on the other cells and is why the
+  column went; the Claude cell was not one of its examples. The 2026-09-11
+  record states the correction, and `harnesses.json` now carries it as the
+  Claude entry's measured note. Amended in place rather than deleted, because
+  the reasoning is still load-bearing and because a reader who finds only the
+  original text acts on a claim that skips the one setup step needing a human.
+  A task-1 implementer in the 0.20.0 delivery did exactly that, reading this
+  bullet and not the correction 600 lines later.
 - Orca's injected worker preamble already requires a short executive summary in
   the message body and a `payload.reportPath` pointing at any long-form
   artifact. The convention this project was about to invent already exists.
