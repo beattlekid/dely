@@ -3,11 +3,144 @@
 What has been settled, what is still open, and what was rejected and why.
 Rationale is kept because the reasons are the reusable part.
 
-Last updated 2026-09-14.
+Last updated 2026-09-16.
 
 ---
 
 ## Settled
+
+### 2026-09-16 — Dely drops its structural suite, its CI job, and the code for harnesses it cannot support
+
+#### Context
+
+A clean-slate architecture review of 0.18.0 at `3ee4e1a` on 2026-09-15 measured
+the package against what the live probes of 2026-09-13 and 2026-09-14 actually
+exercised. Three findings decided this entry.
+
+**The suite was a change detector, not a defect detector.** Measured in this
+repository on 2026-09-16: 89 CI runs of the `contracts` workflow, 86 green, one
+cancelled, two red. One red was the commit adding the logo assets, where the
+disclosure grep matched coordinates inside an SVG path — a false positive. The
+other was an external contributor's pull request, whose logs have since expired.
+No defect in this repository's own shipped code was first found by CI. Every
+defect that mattered in the 0.18.0 series was found by running the real thing:
+lost nudge wakes, a verify that blocked past Codex's 30 s exec yield, an
+Antigravity launch that failed after 150 s with an empty quote. Meanwhile
+`tests/contracts.sh` took 56 commits on `main` against 39 for everything under
+`skills/`: the file changed more often than the thing it protected, because it
+pinned prose verbatim.
+
+**The fake hid the live failures.** `tests/fixtures/fake-orca.js` diverged from
+the real CLI in at least four shapes — `source: stream`, a top-level `stage`,
+`ownershipState`, `requiresAction`. The 51 tests were green through every probe
+round that failed. The suite also left one temporary directory per run under the
+OS temp directory; 1,340 had accumulated by the time they were counted.
+
+**Roughly 45% of the helper served a harness that is deferred or a screen it
+should not be reading.** The Antigravity adopt path exists to patch
+`worker-start` for one harness and is the only place with a known residual leak.
+The `GATES` list is lexical string matching against a TUI: two entries had
+already been removed as false positives, and the raw screen tail carries the
+same information. `pinWhy` fails closed for harnesses that cannot take
+`--model`, which is meaningless once every supported harness accepts it.
+
+The probe rounds ran nine harness-by-role cells over Claude Code, Codex CLI and
+Cursor Agent CLI, and all nine went through Orca's orchestration lifecycle.
+Copilot, Antigravity, Grok and Kiro were each reached, but each needed either a
+launch patch, a Control wake mode with no measured event path, or a step Orca
+cannot express.
+
+#### Decision
+
+0.19.0 ships the protocol and the helper the probes exercised, and nothing else.
+
+- **No structural suite and no CI job.** `tests/` and
+  `.github/workflows/contracts.yml` are deleted. The closure gates in
+  `AGENTS.md` are static checks: whitespace, JSON validity, shell and JavaScript
+  syntax enumerated from `git ls-files`, the absence commands, the disclosure
+  greps, and a version gate. `CONTRIBUTING.md` and the pull-request template no
+  longer name a suite.
+- **The version pin lives in `AGENTS.md`.** The gate names the literal version
+  and both manifests must match it, so a delivery that changes `skills/`
+  advances the version in the same delivery. This replaces the pin that used to
+  sit inside `contracts.sh` and the CI step that compared the two manifests.
+- **The helper loses the adopt path, the gate classifier and the pin
+  validator.** With them go `dely.cmd` and the launcher's Electron branch:
+  no probe ever ran either, on any platform.
+- **Install and discovery name the harnesses this release supports.** Grok
+  Build, Antigravity CLI, Kiro CLI and GitHub Copilot CLI keep their measured
+  launch mechanics in `skills/delivery/references/harnesses.md`; they lose their
+  install sections and their discovery commands. This narrows what is
+  documented. It does not declare a closed set, and each of them returns as a
+  status change once its integration cost is paid.
+- **Verification is a live checklist.** `probe/checklist.md` carries seven rows —
+  three rotated deliveries, a killed worker, an untrusted pin, an idle
+  transcript worker, and a full trust-intervention loop — run by a separate
+  agent session before a release, against a candidate installed for real from a
+  `git archive` snapshot and verified by hash at every install location.
+  `probe/mkrepo.sh` builds the probe repositories and `probe/trust.sh` acts as
+  the human on a trust dialog. Both refuse any path outside `~/dely-probe/`.
+  `trust.sh` reports trust from the harness store, because the earlier probe
+  script reported success twice from the screen while
+  `projects[<path>].hasTrustDialogAccepted` stayed false. Dely itself still
+  never answers a dialog, and no skill references `probe/`.
+- **This release verified rows 1, 4, 5 and 7.** The other rows are the next
+  release's floor, not this one's.
+
+#### Alternatives considered
+
+- **Keep the suite and fix the fake.** Rejected: the fake would have to track a
+  CLI that is not this project's, and the four shape divergences were found by
+  running the real CLI, which is the thing the fake exists to avoid. Fixing it
+  buys a green suite, not a caught defect.
+- **Keep the suite, delete only the prose pins.** Rejected: the prose pins are
+  most of the 56 commits and most of what it caught. What is left is syntax and
+  JSON validity, which the static gates now do in four lines.
+- **Keep CI for the version comparison alone.** Rejected: a literal pin in
+  `AGENTS.md` is the same check without a workflow, and it is visible in the
+  file a Control already reads.
+- **Keep the Antigravity adopt path until its harness returns.** Rejected: it
+  is the only residual leak in the helper, it patches a bug in another tool, and
+  the measured facts needed to bring the harness back are in the harness
+  reference, not in the code.
+- **Delete `references/harnesses.md` in this delivery.** Rejected: the helper
+  still reads its `Control wake` column, and the redesign delivery replaces it
+  with `harnesses.json`. Deleting it twice is worse than deleting it once.
+
+#### Consequences
+
+- A contributor no longer gets a green check that says the change is shaped
+  right. The pull-request template asks what was run instead, and a maintainer
+  runs the live checklist before a release.
+- A regression in the helper is now caught by a live row or not at all. Between
+  releases the package has no automated coverage.
+- The four deferred harnesses lose their only coverage. Antigravity workers stop
+  launching at all, because the adopt path was what made them start.
+- Windows and the Electron runtime lose their documented path. Neither was ever
+  observed working, so this records the state rather than changing it.
+- This does not make `SKILL.md` shorter, does not change the log, does not move
+  preflight, and does not make setup harness-agnostic. Those are the redesign
+  delivery's contract and should not be judged against this one.
+
+#### Non-goals
+
+- Reducing what a delivery costs to run. The deletions remove code, not steps.
+- Changing the protocol. Gates, shapes, acceptance, handoff, independent review,
+  one remediation pass and release are untouched.
+- Changing distribution. The three plugin manifests stay.
+
+#### Deferred
+
+- `harnesses.json`, the harness-agnostic setup skill, the JSONL log, the shorter
+  `SKILL.md`, preflight at setup and after `NO_ACK`, and `dely` with no
+  arguments printing version, SHA and the `SKILL.md` hash. Trigger: the redesign
+  delivery on `main`, which follows this one.
+- Checklist rows 2, 3 and 6 on this release. Trigger: the next release, whose
+  floor is all seven rows.
+- Returning a deferred harness. Trigger: a measured launch path that needs no
+  patch in Dely, and a Control wake mode with an observed event.
+- Rerunning rows 1, 4 and 5 after an Orca upgrade. Recommended, not yet
+  confirmed as a rule; trigger is the first time an Orca upgrade breaks a row.
 
 ### 2026-09-14 — Dely coordinates on Orca's own supervised loop; the 0.18.0 runtime is replaced by a small helper
 
