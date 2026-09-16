@@ -66,7 +66,11 @@ cannot express.
   sit inside `contracts.sh` and the CI step that compared the two manifests.
 - **The helper loses the adopt path, the gate classifier and the pin
   validator.** With them go `dely.cmd` and the launcher's Electron branch:
-  no probe ever ran either, on any platform.
+  no probe ever ran either, on any platform. Preflight's early failure comes
+  from Orca's own projection instead of from dialog strings: a dispatch whose
+  `stage.worker` reads `start_unknown` is dropped with the worker's screen
+  quoted. On an untrusted Claude pin that projection was measured flipping at
+  about 41 s, against about 150 s for the timeout it replaces.
 - **Install and discovery name the harnesses this release supports.** Grok
   Build, Antigravity CLI, Kiro CLI and GitHub Copilot CLI keep their measured
   launch mechanics in `skills/delivery/references/harnesses.md`; they lose their

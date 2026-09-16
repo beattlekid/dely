@@ -180,18 +180,18 @@ function preflight(f) {
     delete open[id];
     failed++;
   };
-  const pollFailed = () => {
+  const pollDead = () => {
     const rows = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []);
     for (const [id, rec] of Object.entries(open)) {
       if (rec.messaged) continue;
       const w = rows.find((x) => x.dispatchId === id);
-      if (!w || w.dispatchStatus !== "failed") continue;
-      const detail = ((w.projection || {}).stage || {}).detail || "failed";
-      drop(
-        id,
-        rec,
-        "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL worker failed: " + detail + "; last output: " + lastText(id)
-      );
+      if (!w) continue;
+      const stage = (w.projection || {}).stage || {};
+      let why = "";
+      if (w.dispatchStatus === "failed") why = "worker failed: " + (stage.detail || "failed");
+      else if (stage.worker === "start_unknown") why = "worker never started a turn: " + (stage.detail || "start_unknown");
+      if (!why) continue;
+      drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL " + why + "; last output: " + lastText(id));
     }
   };
   const t0 = Date.now();
@@ -223,8 +223,7 @@ function preflight(f) {
       }
       orca(["orchestration", "check", "--run", f.run, "--ack", res.deliveryId]);
     }
-    pollFailed();
-    sleep(Math.max(1, Math.floor(POLL_S * 1000)));
+    pollDead();
   }
   for (const [id, rec] of Object.entries(open)) {
     drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id));
