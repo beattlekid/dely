@@ -25,7 +25,7 @@
         "needsImport": true,
         "importLine": "@AGENTS.md"
       },
-      "notes": "worker-start --model pin honoured. The two discovery probes are answered locally (num_turns 0, total_cost_usd 0, no model turn); do not treat them as a dispatch. Trust is a dialog. Measured 2026-09-04: --dangerously-skip-permissions on a path with no exact-path trust-store entry reached the composer with no dialog shown and no entry created."
+      "notes": "worker-start --model pin honoured. The two discovery probes are answered locally (num_turns 0, total_cost_usd 0, no model turn); do not treat them as a dispatch. Trust is a dialog. A fresh repository shows the trust dialog even with --dangerously-skip-permissions, with No, exit preselected, reproduced 2026-09-11 on Claude Code 2.1.268; a worktree of an already-trusted repository inherits trust and shows none, which is what the withdrawn 2026-09-04 probe actually measured — do not re-propose that 2026-09-04 reading."
     },
     {
       "name": "Codex CLI",
@@ -69,7 +69,7 @@
         "readsAgentsMd": true,
         "needsImport": false
       },
-      "notes": "Deferred. Control wakes by waker. Grok Build 1.0.30 asks a y/n security question in a fresh repository (measured 2026-09-14), so trust is dialog, not none. Opens at the composer with no workspace-trust surface (measured 2026-08-29). Grok validates root plugin.json (name and description only). worker-start --model does not support this id; models come from Orca's per-agent default arguments. PATH agent collides with this binary, so Cursor must not be documented as agent. No discovery command is offered while deferred."
+      "notes": "Deferred. Control wakes by waker. Grok Build 1.0.30 asks a y/n security question in a fresh repository (measured 2026-09-14), so trust is dialog, not none. Opens at the composer with no workspace-trust surface (measured 2026-08-29; unconfirmed by the 2026-09-11 method that retracted the Claude result — re-measure before relying on it). Grok validates root plugin.json (name and description only). worker-start --model does not support this id; models come from Orca's per-agent default arguments. PATH agent collides with this binary, so Cursor must not be documented as agent. No discovery command is offered while deferred."
     },
     {
       "name": "Antigravity CLI",
@@ -108,7 +108,7 @@
         "readsAgentsMd": true,
         "needsImport": false
       },
-      "notes": "Deferred. worker-start --agent kiro-cli returns agent_unconfigured; the id that resolves is kiro. Control wake is unsupported. permissionDefault is none; --trust-all-tools is forbidden on the launch argv because it opens a confirmation whose default is No, exit, and Orca's Enter kills the session. Once the TUI is idle, /tools trust-all was observed to trust tools for the session with no confirmation dialog. Headless kiro-cli chat --no-interactive is not a Dely worker. Native AGENTS.md. Discovery while supported was kiro-cli chat --list-models --format json (offer each model_id) and effort from kiro-cli chat --help; live 2.16.2 may offer only auto. Install is npx skills targeting the kiro-cli agent at global scope. No workspace-trust surface (measured 2026-08-29). Do not write ~/.kiro or create custom agents."
+      "notes": "Deferred. worker-start --agent kiro-cli returns agent_unconfigured; the id that resolves is kiro. Control wake is unsupported. permissionDefault is none; --trust-all-tools is forbidden on the launch argv because it opens a confirmation whose default is No, exit, and Orca's Enter kills the session. Once the TUI is idle, /tools trust-all was observed to trust tools for the session with no confirmation dialog. Headless kiro-cli chat --no-interactive is not a Dely worker. Native AGENTS.md. Discovery while supported was kiro-cli chat --list-models --format json (offer each model_id) and effort from kiro-cli chat --help; live 2.16.2 may offer only auto. Install is npx skills targeting the kiro-cli agent at global scope. No workspace-trust surface (measured 2026-08-29; unconfirmed by the 2026-09-11 method that retracted the Claude result — re-measure before relying on it). Do not write ~/.kiro or create custom agents."
     },
     {
       "name": "Cursor Agent CLI",
