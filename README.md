@@ -5,8 +5,6 @@
   <img src="assets/logo-light.svg" alt="dely" width="72" height="72">
 </picture>
 
-[![contracts](https://github.com/hieuphung97/dely/actions/workflows/contracts.yml/badge.svg)](https://github.com/hieuphung97/dely/actions/workflows/contracts.yml)
-
 Ask for a change; Dely takes it through design approval, implementation,
 independent review, and a pull request you merge.
 

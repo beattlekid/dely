@@ -2,7 +2,8 @@
 
 Decision record: `docs/decisions.md`, the 2026-09-16 entry.
 
-**Baseline:** the SHA of the commit carrying the 2026-09-16 decision record and this plan.
+**Baseline:** `abd5476`, the commit carrying the 2026-09-16 decision record
+and this plan.
 
 ## Goal
 
@@ -118,9 +119,11 @@ files, so it keeps holding as files come and go.
 `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`.
 
 **Focused verification.** `test ! -e tests && test ! -e .github/workflows/contracts.yml`,
-and `git grep -n 'contracts\.sh\|scripts\.test\.js\|workflows/contracts' -- . ':!docs/_plans' ':!docs/decisions.md'`
+and `git grep -n 'contracts\.sh\|scripts\.test\.js\|actions/workflows' -- . ':!docs/_plans' ':!docs/decisions.md'`
 returns nothing. It fails if the directory is deleted while a document still
-sends someone to it.
+sends someone to it. The pattern names the two deleted files and the badge URL,
+not the string `workflows/contracts`, because the absence gate in `AGENTS.md`
+legitimately contains that path.
 
 **Document impact.** `AGENTS.md` owns the closure gates and the version rule;
 `CONTRIBUTING.md` and the pull-request template own the contributor-facing

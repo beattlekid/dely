@@ -1,17 +1,18 @@
 # dely — Agent Instructions
 
 This repository contains the `dely` package: the `delivery` skill and its
-automation-first control protocol for Claude Code, Codex CLI, Grok Build,
-Antigravity CLI, Kiro CLI, Cursor Agent CLI, and GitHub Copilot CLI.
+automation-first control protocol for coding agents, supported today on
+Claude Code, Codex CLI, and Cursor Agent CLI.
 
 ## Source of truth
 
 - The workflow contract is `skills/delivery/SKILL.md`.
 - Settled, open, and rejected decisions are recorded in `docs/decisions.md`.
 - Installation and onboarding instructions are in `README.md`.
-- Structural contract checks live in `tests/contracts.sh`; GitHub Actions runs
-  them on every pull request and `main` from
-  `.github/workflows/contracts.yml`, whose unique required job is `contracts`.
+- The closure gates below are the whole structural check. There is no test
+  suite and no CI workflow; nothing runs on a pull request automatically.
+- Live verification before a release is `probe/checklist.md`, run by a separate
+  agent session against a candidate installed from a `git archive` snapshot.
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and `.github/`
   (issue and pull-request templates) own the human contribution, conduct,
   security, and PR contract; they need no Dely or Orca install to follow.
@@ -33,8 +34,7 @@ Repository artifacts are written in English.
   the one shipping them. Plugin caches and any live worker hook wiring are
   refreshed only between plans.
 - A delivery that changes anything under `skills/` advances the version in
-  both plugin manifests and the pin in `tests/contracts.sh`, within that
-  same delivery.
+  both plugin manifests and the version gate below, within that same delivery.
 
 ## Phase dispatch
 
@@ -69,26 +69,23 @@ git diff --check
 ```
 
 ```bash
-bash -n tests/contracts.sh
-```
-
-```bash
 jq -e . plugin.json .claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json .cursor-plugin/plugin.json >/dev/null
 ```
 
 ```bash
-bash tests/contracts.sh
+node --check skills/delivery/scripts/dely.js
+git ls-files -z '*.sh' 'skills/delivery/scripts/dely' | xargs -0 -n1 bash -n
 ```
 
 ```bash
-node --test tests/scripts.test.js
+test "$(jq -r .version .claude-plugin/plugin.json)" = 0.19.0
+test "$(jq -r .version .codex-plugin/plugin.json)" = 0.19.0
 ```
 
 ```bash
-test "$(wc -l < tests/contracts.sh)" -le 280
-```
-
-```bash
+test ! -e tests
+test ! -e .github/workflows/contracts.yml
+test ! -e skills/delivery/scripts/dely.cmd
 test ! -e git-hooks/pre-push
 test ! -e docs/delivery-log.md
 test ! -e docs/findings.md
@@ -104,15 +101,27 @@ test ! -e hooks/session-start-context.sh
 ```
 
 ```bash
+git grep -nE 'adoptCommand|adoptedPermission|adoptPath|readAdopts|writeAdopts|recordAdopt|takeAdopt|closeAdopted|closeCreated|waitQuiet|lastOutputAt|launchKind|hasGate|GATES|pinWhy|ELECTRON' -- skills/ && exit 1 || true
+```
+
+```bash
 git grep -Ei 'pace.?id' -- . ':!docs/_plans' && exit 1 || true
 git grep -E '(^|[^A-Za-z0-9])[A-Z][0-9]+[a-z]?([^A-Za-z0-9]|$)' -- . ':!docs/_plans' && exit 1 || true
 ```
 
 The first three gates prove repository shape and syntax only. A Bounded or
 Architectural change to runtime behaviour must also name a focused instrument
-that distinguishes the changed behaviour from its failure mode. The absence
-commands distinguish a deleted rail from documentation that merely says it is
-deleted.
+that distinguishes the changed behaviour from its failure mode, and a change
+to what a worker launch does is verified by running `probe/checklist.md`, not
+by these gates.
+
+The version gate is a literal pin. It is what keeps the two manifests from
+splitting now that no workflow compares them: a `skills/` change that forgets
+one manifest ships different protocol text under the same version string.
+
+The absence commands distinguish a deleted rail from documentation that merely
+says it is deleted. The identifier grep is the same instrument applied to code:
+it fails on a deletion that removes a definition and leaves a caller.
 
 The disclosure grep is lexical. It catches named consumer identifiers; it does
 not catch a quoted consumer path, a branch name, or a session id. A green result
