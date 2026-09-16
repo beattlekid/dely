@@ -243,7 +243,7 @@ function dispatch(f) {
   const p = pin(f.repo, f.phase);
   const spec =
     fs.readFileSync(path.resolve(f.repo, f["spec-file"]), "utf8") +
-    "\n\nFirst action, before anything else: send a heartbeat with subject `ack`.";
+    "\n\nFirst action, before anything else: send a heartbeat with subject `ack`. The Orca preamble and this spec file are everything the worker needs; read no other skill.";
   const s = start(f.repo, f.run, p, spec, f.phase);
   if (s.error) out("FAILED " + s.error, 5);
   const interval = Math.max(20, Math.min(5000, Math.floor(POLL_S * 1000)));
