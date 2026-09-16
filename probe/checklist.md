@@ -48,6 +48,10 @@ find ~/.claude/plugins ~/.claude/skills ~/.agents/skills ~/.codex ~/.cursor \
   -name SKILL.md -path '*delivery*' -exec shasum -a 256 {} +
 ```
 
+Include the marketplace source directory, not only the plugin cache. A Claude
+Control was observed running `scripts/dely` straight out of the marketplace
+path it was added from, so a cache that matches proves nothing on its own.
+
 Every hash must match the snapshot. A copy with a different hash — including a
 symlink left behind by an older install — wins over the plugin and silently
 runs a different protocol. Stop and report rather than deleting someone's
@@ -84,8 +88,13 @@ is pre-approved as Bounded within `REQUEST.md`; stop only where the skill
 requires a human.
 
 Follow it with `orca orchestration run-list` filtered by `coordinator_handle`,
-`orca orchestration worker-list`, and `orca terminal read`, until the Control
-screen stops changing and no worker is `dispatched`.
+`orca orchestration worker-list`, and `orca terminal read --screen`, until the
+Control screen stops changing and no worker is `dispatched`.
+
+Use `--screen`. Without it a read returns accumulated output, which comes back
+as stacked fragments for any TUI and as an empty tail once a previous read has
+consumed the cursor. `worker-list` may also report an empty `taskTitle`, so
+identify a dispatch by its id and the order it appeared, not by its title.
 
 Collect: the SHA on the remote, the disposition in the handoff, how many times
 a human had to act and why, wall time, and per-phase time.
@@ -108,6 +117,14 @@ again exactly once.
 This is the row that catches a helper which prints `DISPATCHED` without ever
 waiting for the acknowledgement: such a helper passes row 1 whenever the worker
 happens to start, and fails here.
+
+The signal is Orca's, not Dely's: `dely wait` reports `ATTENTION` when a
+`worker-list` row carries a `projection.nextAction` other than `none`. That
+projection has already changed between Orca releases, so record the Orca
+version next to the result, and when this row fails, check the projection
+directly before blaming the helper. A row whose `terminalState` stays `active`
+and whose `nextAction` stays `none` while the agent process is gone is an
+execution-plane finding, not a Dely one.
 
 ## Step 5 — row 5, a pin that has not answered its dialog
 
