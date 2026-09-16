@@ -26,8 +26,11 @@ Repository artifacts are written in English.
   investigation only and starts no delivery run.
 - Durable decisions live in `docs/decisions.md`; transient plans live in
   `docs/_plans/`.
-- Maintenance logging is machine-local and opt-in at `~/.dely/log`; no
-  project-owned log file is tracked.
+- Maintenance logging is machine-local and opt-in at `~/.dely/log.jsonl`
+  (JSON Lines, one object per line); no project-owned log file is tracked.
+  Dely never creates `~/.dely/`: a missing directory means nothing is
+  written and nothing is created. The log records failed and abandoned
+  deliveries too, which the previous format did not.
 - A self-update runs its release phase through the frozen installed plugin
   version, because Control is already using it when the plan starts.
   Candidate changes in this checkout take effect for the next delivery, not
@@ -53,9 +56,10 @@ delivery run.
 <!-- dely:end -->
 
 The table is this repository's deployment selection, not the portable
-protocol. Per-harness launch mechanics — Orca agent id, permission
-defaults, forbidden headless forms, and launch notes — live in
-`skills/delivery/references/harnesses.md`.
+protocol. Per-harness facts — status, Control wake, trust, discovery,
+model and effort flag support, permission defaults, forbidden headless
+forms, the instructions-file rule, and measured notes including for
+deferred harnesses — live in `harnesses.json` at the repository root.
 
 This project adds no phase-implied sandbox. Native Internet access, closure
 gates, result writes and coordinator completion stay available.
@@ -78,30 +82,16 @@ git ls-files -z '*.sh' 'skills/delivery/scripts/dely' | xargs -0 -n1 bash -n
 ```
 
 ```bash
-test "$(jq -r .version .claude-plugin/plugin.json)" = 0.19.0
-test "$(jq -r .version .codex-plugin/plugin.json)" = 0.19.0
+test "$(jq -r .version .claude-plugin/plugin.json)" = 0.20.0
+test "$(jq -r .version .codex-plugin/plugin.json)" = 0.20.0
 ```
 
 ```bash
-test ! -e tests
-test ! -e .github/workflows/contracts.yml
-test ! -e skills/delivery/scripts/dely.cmd
-test ! -e git-hooks/pre-push
-test ! -e docs/delivery-log.md
-test ! -e docs/findings.md
-test ! -e docs/harness-surface.md
-test ! -e docs/options.md
-test ! -e docs/_plans/2026-08-24-automation-first-dely-design.md
-test ! -e bin/delivery-doctor
-test ! -e bin/delivery-evidence
-test ! -e hooks/hooks.json
-test ! -e hooks/grok-hooks.json.template
-test ! -e hooks/post-tool-journal.sh
-test ! -e hooks/session-start-context.sh
+test ! -e skills/delivery/references/harnesses.md
 ```
 
 ```bash
-git grep -nE 'adoptCommand|adoptedPermission|adoptPath|readAdopts|writeAdopts|recordAdopt|takeAdopt|closeAdopted|closeCreated|waitQuiet|lastOutputAt|launchKind|hasGate|GATES|pinWhy|ELECTRON' -- skills/ && exit 1 || true
+git grep -nE 'adoptCommand|adoptedPermission|adoptPath|readAdopts|writeAdopts|recordAdopt|takeAdopt|closeAdopted|closeCreated|waitQuiet|lastOutputAt|launchKind|hasGate|GATES|pinWhy|ELECTRON|harnessCell' -- skills/ && exit 1 || true
 ```
 
 ```bash
@@ -119,9 +109,11 @@ The version gate is a literal pin. It is what keeps the two manifests from
 splitting now that no workflow compares them: a `skills/` change that forgets
 one manifest ships different protocol text under the same version string.
 
-The absence commands distinguish a deleted rail from documentation that merely
-says it is deleted. The identifier grep is the same instrument applied to code:
-it fails on a deletion that removes a definition and leaves a caller.
+The absence command distinguishes a deleted rail from documentation that
+merely says it is deleted. This delivery deleted
+`skills/delivery/references/harnesses.md`; the command fails if that file
+returns. The identifier grep is the same instrument applied to code: it
+fails on a deletion that removes a definition and leaves a caller.
 
 The disclosure grep is lexical. It catches named consumer identifiers; it does
 not catch a quoted consumer path, a branch name, or a session id. A green result

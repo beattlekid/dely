@@ -68,6 +68,10 @@ find ~/.claude/plugins ~/.claude/skills ~/.agents/skills ~/.codex ~/.cursor \
   -name SKILL.md -path '*delivery*' -exec shasum -a 256 {} +
 ```
 
+`dely` with no arguments now prints the version, SHA and sha256 of
+`SKILL.md`, so a candidate can identify itself from inside whichever copy
+actually ran — a stronger check than hashing paths from outside.
+
 Include the marketplace source directory, not only the plugin cache. A Claude
 Control was observed running `scripts/dely` straight out of the marketplace
 path it was added from, so a cache that matches proves nothing on its own.
@@ -141,13 +145,25 @@ This is the row that catches a helper which prints `DISPATCHED` without ever
 waiting for the acknowledgement: such a helper passes row 1 whenever the worker
 happens to start, and fails here.
 
-The signal is Orca's, not Dely's: `dely wait` reports `ATTENTION` when a
-`worker-list` row carries a `projection.nextAction` other than `none`. That
-projection has already changed between Orca releases, so record the Orca
-version next to the result, and when this row fails, check the projection
-directly before blaming the helper. A row whose `terminalState` stays `active`
-and whose `nextAction` stays `none` while the agent process is gone is an
-execution-plane finding, not a Dely one.
+The signal is Orca's, not Dely's. `dely wait` reports `ATTENTION` when
+`dispatchStatus` is `dispatched` and either `nextAction.kind` is not `none`
+or `projection.attention.requiresAction` is true. That projection has
+already changed shape between Orca releases, so record the Orca version
+next to the result, and when this row fails, check the projection
+directly before blaming the helper.
+
+Measured on Orca 1.4.203 during this delivery's design:
+
+| Worker state | `dispatchStatus` | `liveness.verdict` | `nextAction.kind` | `attention.requiresAction` |
+| --- | --- | --- | --- | --- |
+| Healthy, working (45 samples over 92 s) | `dispatched` | `live` | `none` | `false` |
+| Killed after acknowledgement (from ≤1 s, held ≥132 s) | `dispatched` | `unverifiable` / `missing_status` | `none` | `true` |
+| Settled, awaiting release | `completed` | `live` | `release` | `false` |
+| Starting, ~1–2 s transient | `pending` | `unverifiable` | `none` | `true` |
+
+`worker-show`'s `observation.status` and the terminal's `connected` flag
+were both measured against the killed worker and neither moves, so
+neither is a substitute.
 
 ## Step 5 — row 5, a pin that has not answered its dialog
 
