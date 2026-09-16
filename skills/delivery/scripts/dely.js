@@ -11,23 +11,8 @@ const POLL_S = Number(process.env.DELY_POLL_S || 15);
 const PROGRESS_S = Number(process.env.DELY_PROGRESS_S || 60);
 const seconds = (v, d) => (Number.isFinite(+v) && +v > 0 ? +v : d);
 const PREFLIGHT_S = seconds(process.env.DELY_PREFLIGHT_S, 150);
-const QUIET_S = seconds(process.env.DELY_QUIET_S, 3);
-const QUIET_MIN_S = seconds(process.env.DELY_QUIET_MIN_S, 5);
-const QUIET_CAP_S = seconds(process.env.DELY_QUIET_CAP_S, 90);
 const NOTIFY_RETRY_S = seconds(process.env.DELY_NOTIFY_RETRY_S, 30);
 const NOTIFY_GIVEUP_S = seconds(process.env.DELY_NOTIFY_GIVEUP_S, 1800);
-
-const GATES = [
-  "Do you trust the contents",
-  "Confirm folder trust",
-  "Workspace Trust Required",
-  "Security guide",
-  "No, exit",
-  "Select login method",
-  "posing security risks",
-  "Session ended",
-  "hit your free usage limit",
-];
 
 function orca(args) {
   const bin = process.env.ORCA_CLI_COMMAND || "orca";
@@ -91,23 +76,6 @@ const out = (line, code) => {
   if (code != null) process.exit(code);
 };
 
-function pinWhy(p) {
-  const can = ["claude", "codex", "cursor"].includes(p.agent);
-  if (!can && p.model !== "default") {
-    return (
-      "pin " +
-      p.phase +
-      " " +
-      p.agent +
-      ": Orca cannot pin this model; write default and set the model in Orca's agent default arguments"
-    );
-  }
-  if (p.effort !== "default" && p.model === "default") {
-    return "pin " + p.phase + " " + p.agent + ": --effort requires --model";
-  }
-  return null;
-}
-
 function harnessCell(agent, col) {
   const md = fs.readFileSync(path.join(__dirname, "../references/harnesses.md"), "utf8");
   for (const line of md.split("\n")) {
@@ -115,117 +83,6 @@ function harnessCell(agent, col) {
     if (c[2] === agent) return c[col] || "";
   }
   return "";
-}
-
-function launchKind(agent) {
-  return agent === "antigravity" ? "adopt" : "worker-start";
-}
-
-function adoptedPermission(agent) {
-  try {
-    const data = JSON.parse(
-      fs.readFileSync(
-        path.join(os.homedir(), "Library", "Application Support", "orca", "profiles", "local-default", "orca-data.json"),
-        "utf8"
-      )
-    );
-    const v = data && data.settings && data.settings.agentDefaultArgs && data.settings.agentDefaultArgs[agent];
-    if (v != null && v !== "") return Array.isArray(v) ? v.join(" ") : String(v);
-  } catch (_) {
-    /* table fallback */
-  }
-  return harnessCell(agent, 3);
-}
-
-function adoptCommand(agent, perm) {
-  return [agent === "antigravity" ? "agy" : agent, perm].filter(Boolean).join(" ");
-}
-
-function lastOutputAt(handle) {
-  const r = orca(["terminal", "show", "--terminal", handle]);
-  const raw = r.result && r.result.terminal && r.result.terminal.lastOutputAt;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function terminalTail(handle) {
-  if (!handle) return [];
-  const r = orca(["terminal", "read", "--terminal", handle]);
-  const tail = r.result && r.result.terminal && r.result.terminal.tail;
-  return Array.isArray(tail) ? tail.filter((l) => String(l || "").trim()) : [];
-}
-
-function waitQuiet(handle, launchedAt) {
-  const cap = launchedAt + QUIET_CAP_S * 1000;
-  for (;;) {
-    const now = Date.now();
-    if (now >= cap) return false;
-    const lo = lastOutputAt(handle);
-    if (lo != null && (now - launchedAt) / 1000 >= QUIET_MIN_S && (now - lo) / 1000 >= QUIET_S) return true;
-    sleep(500);
-  }
-}
-
-function adoptPath(run) {
-  return path.join(os.tmpdir(), "dely-adopt-" + run + ".json");
-}
-
-function readAdopts(run) {
-  try {
-    const j = JSON.parse(fs.readFileSync(adoptPath(run), "utf8"));
-    return Array.isArray(j) ? j : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-function writeAdopts(run, rows) {
-  const p = adoptPath(run);
-  if (!rows.length) {
-    try {
-      fs.unlinkSync(p);
-    } catch (_) {
-      /* gone */
-    }
-    return;
-  }
-  fs.writeFileSync(p, JSON.stringify(rows));
-}
-
-function recordAdopt(run, dispatchId, handle) {
-  if (!run || !dispatchId || !handle) return;
-  const rows = readAdopts(run).filter((r) => r.dispatchId !== dispatchId);
-  rows.push({ dispatchId, handle });
-  writeAdopts(run, rows);
-}
-
-function takeAdopt(run, dispatchId) {
-  const rows = readAdopts(run);
-  const hit = rows.find((r) => r.dispatchId === dispatchId);
-  writeAdopts(
-    run,
-    rows.filter((r) => r.dispatchId !== dispatchId)
-  );
-  return (hit && hit.handle) || "";
-}
-
-function closeAdopted(run, dispatchId) {
-  closeCreated(takeAdopt(run, dispatchId));
-}
-
-function idOf(m) {
-  const raw = m && m.payload;
-  if (raw == null) return "";
-  try {
-    const p = typeof raw === "string" ? JSON.parse(raw) : raw;
-    return (p && p.dispatchId) || "";
-  } catch (_) {
-    return "";
-  }
-}
-
-function closeCreated(handle) {
-  if (handle) orca(["terminal", "close", "--terminal", handle]);
 }
 
 function start(repo, run, p, spec, title) {
@@ -240,44 +97,19 @@ function start(repo, run, p, spec, title) {
     run,
     "--task-title",
     title,
+    "--agent",
+    p.agent,
   ];
-  let createdHandle = "";
-  if (launchKind(p.agent) === "adopt") {
-    const created = orca([
-      "terminal",
-      "create",
-      "--worktree",
-      "path:" + repo,
-      "--command",
-      adoptCommand(p.agent, adoptedPermission(p.agent)),
-    ]);
-    createdHandle = created.result && created.result.terminal && created.result.terminal.handle;
-    if (!createdHandle) return { error: (created.error && created.error.message) || "terminal create" };
-    if (!waitQuiet(createdHandle, Date.now())) {
-      closeCreated(createdHandle);
-      return { error: "readiness timeout" };
-    }
-    const launched = terminalTail(createdHandle);
-    if (hasGate(launched.join("\n"))) {
-      closeCreated(createdHandle);
-      return { error: "gate on screen: " + quote(launched.join("\n")) };
-    }
-    args.push("--terminal", createdHandle);
-  } else {
-    args.push("--agent", p.agent);
-    if (["claude", "codex", "cursor"].includes(p.agent)) {
-      if (p.model !== "default") args.push("--model", p.model);
-      if (p.effort !== "default") args.push("--effort", p.effort);
-    }
+  if (["claude", "codex", "cursor"].includes(p.agent)) {
+    if (p.model !== "default") args.push("--model", p.model);
+    if (p.effort !== "default") args.push("--effort", p.effort);
   }
   const r = orca(args);
   const id = r.result && r.result.dispatchId;
   if (!id) {
-    closeCreated(createdHandle);
     return { error: (r.error && r.error.message) || String((r.result && r.result.failedStage) || "worker-start") };
   }
-  if (createdHandle) recordAdopt(run, id, createdHandle);
-  return { id, createdHandle };
+  return { id };
 }
 
 function namesDispatch(m, id) {
@@ -289,17 +121,6 @@ function clip(s) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(-400);
-}
-
-function hasGate(s) {
-  return GATES.some((g) => String(s || "").includes(g));
-}
-
-function quote(s) {
-  const text = String(s || "");
-  const lines = text.split(/\n/).filter((l) => String(l || "").trim());
-  const hits = lines.filter((l) => hasGate(l));
-  return clip(hits.length ? hits.join("\n") : text);
 }
 
 function messageText(m) {
@@ -332,11 +153,8 @@ function screenLines(id) {
   return [];
 }
 
-function lastText(id, handle) {
-  const lines = screenLines(id);
-  if (lines.length) return quote(lines.join("\n"));
-  if (handle) return quote(terminalTail(handle).join("\n"));
-  return quote("");
+function lastText(id) {
+  return clip(screenLines(id).join("\n"));
 }
 
 function preflight(f) {
@@ -349,24 +167,16 @@ function preflight(f) {
   const open = {};
   let failed = 0;
   for (const p of uniq) {
-    const why = pinWhy(p);
-    if (why) {
-      out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL " + why);
-      failed++;
-      continue;
-    }
     const s = start(f.repo, f.run, p, spec, "preflight-" + p.phase);
     if (s.error) {
       out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL start: " + s.error);
       failed++;
-    } else open[s.id] = Object.assign({ createdHandle: s.createdHandle, gates: 0, messaged: false }, p);
+    } else open[s.id] = Object.assign({ messaged: false }, p);
   }
   const drop = (id, rec, line) => {
     out(line);
     orca(["orchestration", "worker-stop", "--dispatch", id]);
     orca(["orchestration", "worker-release", "--dispatch", id]);
-    takeAdopt(f.run, id);
-    closeCreated(rec.createdHandle);
     delete open[id];
     failed++;
   };
@@ -380,19 +190,8 @@ function preflight(f) {
       drop(
         id,
         rec,
-        "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL worker failed: " + detail + "; last output: " + lastText(id, rec.createdHandle)
+        "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL worker failed: " + detail + "; last output: " + lastText(id)
       );
-    }
-  };
-  const pollGates = () => {
-    for (const [id, rec] of Object.entries(open)) {
-      if (rec.messaged) {
-        rec.gates = 0;
-        continue;
-      }
-      const lines = screenLines(id);
-      rec.gates = hasGate(lines.join("\n")) ? rec.gates + 1 : 0;
-      if (rec.gates >= 2) drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL gate on screen: " + quote(lines.join("\n")));
     }
   };
   const t0 = Date.now();
@@ -419,26 +218,22 @@ function preflight(f) {
         if (hit && m.type === "worker_done") {
           out("PREFLIGHT " + open[hit].phase + " " + open[hit].agent + " PASS " + Math.round((Date.now() - t0) / 1000) + "s");
           orca(["orchestration", "worker-release", "--dispatch", hit]);
-          closeAdopted(f.run, hit);
           delete open[hit];
         }
       }
       orca(["orchestration", "check", "--run", f.run, "--ack", res.deliveryId]);
     }
     pollFailed();
-    pollGates();
     sleep(Math.max(1, Math.floor(POLL_S * 1000)));
   }
   for (const [id, rec] of Object.entries(open)) {
-    drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id, rec.createdHandle));
+    drop(id, rec, "PREFLIGHT " + rec.phase + " " + rec.agent + " FAIL no worker_done in " + PREFLIGHT_S + "s; last output: " + lastText(id));
   }
   process.exit(failed ? 1 : 0);
 }
 
 function dispatch(f) {
   const p = pin(f.repo, f.phase);
-  const pinFail = pinWhy(p);
-  if (pinFail) out("FAILED " + pinFail, 5);
   const spec =
     fs.readFileSync(path.resolve(f.repo, f["spec-file"]), "utf8") +
     "\n\nFirst action, before anything else: send a heartbeat with subject `ack`.";
@@ -452,11 +247,9 @@ function dispatch(f) {
     const row = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).find((w) => w.dispatchId === s.id);
     if (row && row.dispatchStatus === "failed") break;
   }
-  const why = lastText(s.id, s.createdHandle);
+  const why = lastText(s.id);
   orca(["orchestration", "worker-stop", "--dispatch", s.id]);
   orca(["orchestration", "worker-release", "--dispatch", s.id]);
-  takeAdopt(f.run, s.id);
-  closeCreated(s.createdHandle);
   out("NO_ACK " + s.id + " stopped after " + Math.round((Date.now() - t0) / 1000) + "s; last output: " + why, 4);
 }
 
@@ -521,9 +314,6 @@ function wait(f) {
             })),
           })
         );
-        for (const m of msgs) {
-          if (m.type === "worker_done") closeAdopted(f.run, idOf(m));
-        }
         process.exit(0);
       }
       orca(["orchestration", "check", ...as, "--run", f.run, "--ack", res.deliveryId]);

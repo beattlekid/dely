@@ -154,9 +154,7 @@ Usage as the launcher prints it:
   dispatch ids from ATTENTION. A harness whose Control wake is not `background`
   prints `REFUSED <agent> wakes by <wake>; use dely wait-bg` with exit 3, and no `check` runs.
   Without `--control` it prints usage and exits 2. A waker Control never runs `dely wait`.
-  `--as` does not exempt that refusal. After printing `SETTLED` for a batch that holds a
-  `worker_done`, `wait` closes that dispatch's adopted terminal if one was recorded under
-  the OS temp directory for the Run.
+  `--as` does not exempt that refusal.
 - `dely wait-bg --run <runId> --control <agent>` prints `WAITING` (exit 0),
   `ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.`
   (exit 0), or `ERROR <reason>` (exit 9). Requires `ORCA_TERMINAL_HANDLE`.
@@ -199,15 +197,14 @@ receipt records `launch.requested` and `launch.effective`; it does not establish
 the request or that it cannot. Orca applies the execution plane's configured permission default
 and does not add a sandbox the project did not pin.
 
-**Name the model and effort on every dispatch.** The helper honours
-`--model`/`--effort` only for Claude Code, Codex CLI and Cursor Agent CLI
-(and omits a `default` flag). A non-`default` Model on any other harness, or
-a non-`default` Effort with a `default` Model, fails closed and starts no
-worker: write `default` and set the model in Orca's agent default arguments.
-A worker left on a harness default is an unpinned environment: it lives in
-the harness's own config, it changes without announcing itself, and the
-dispatch that relies on it looks identical to one that pinned the same value
-deliberately.
+**Name the model and effort on every dispatch.** The helper passes
+`--model`/`--effort` for Claude Code, Codex CLI and Cursor Agent CLI, and omits
+a flag whose value is `default`. On any other harness it passes neither, and a
+Model written there is silently not applied: write `default` and set the model
+in Orca's agent default arguments. A worker left on a harness default is an
+unpinned environment: it lives in the harness's own config, it changes without
+announcing itself, and the dispatch that relies on it looks identical to one
+that pinned the same value deliberately.
 
 **Never act on an Orca nudge.**
 

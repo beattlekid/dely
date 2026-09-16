@@ -63,9 +63,7 @@ harness and that harness's defaults.
 
 The plugin is `dely`, from the `dely` marketplace at
 `https://github.com/hieuphung97/dely.git`. The skill name is `delivery`;
-invoke it as `dely:delivery`. Kiro CLI has no plugin verb; use
-`### Kiro CLI` below. The runtime needs Node 18 or newer on PATH, or
-Orca's bundled runtime.
+invoke it as `dely:delivery`. The runtime needs Node 18 or newer on PATH.
 
 ### Claude Code
 
