@@ -129,7 +129,9 @@ splitting them would leave `AGENTS.md` committed twice for one contract.
 
 ### 2. The skill states the protocol and transcribes nothing
 
-**Behaviour.** `skills/delivery/SKILL.md` is at most 240 lines. Its `##`
+**Behaviour.** `skills/delivery/SKILL.md` holds only the sections below, and
+no prose line exceeds 80 columns. The line budget was amended from 240 to 323
+once the file was measured at that wrap; see the decision record. Its `##`
 sections are exactly: Two human gates, The control session, Shape, Execution
 envelope, Orca and the helper, Implementation, Review, Release, Failure and
 recovery. Plan Mode and Investigation are one sentence each. Evidence, Changing
@@ -154,9 +156,10 @@ worker needs and that it should read no other skill.
 
 **Focused verification.** Line width first — every other prose file in this
 repository sits at a 90th-percentile line length of 75 to 82 columns, so
-`awk '{print length}' skills/delivery/SKILL.md | sort -n | tail -1` must be
-≤ 80. A line count is only meaningful at a fixed wrap. Then
-`wc -l skills/delivery/SKILL.md` ≤ 240;
+the maximum over prose lines — excluding the YAML frontmatter, Markdown table
+rows and fenced blocks, as in every other file here — must be ≤ 80. A line
+count is only meaningful at a fixed wrap. Then
+`wc -l skills/delivery/SKILL.md` ≤ 323;
 `grep '^## ' skills/delivery/SKILL.md` equal to the nine headings above;
 `git grep -n 'Changing this skill' -- skills/delivery/SKILL.md` and
 `git grep -nE '^## (Language|Evidence)' -- skills/delivery/SKILL.md` empty;
@@ -251,7 +254,7 @@ to `0.19.0` must fail the version gate, and restoring
 | --- | --- | --- | --- |
 | `harnesses.json` is the only home for harness facts | `jq -e` seven-entry field check; `git grep -nE 'dangerously-skip\|dangerously-bypass\|--force\|bypassPermissions\|cursor-agent models\|codex debug models\|claude -p\|--trust-all-tools' -- skills/` empty | A `harnesses.json` added while setup and `SKILL.md` keep their hardcoded lists: the `jq` check passes, the grep fails | |
 | The helper resolves the wake mode from the file, not a literal | `dely wait --run X --control codex` prints `REFUSED … wakes by waker`; with `controlWake` flipped to `background` in a scratch copy of `harnesses.json`, it does not refuse | A helper keeping a `{claude:background, codex:waker}` map: passes the first call, ignores the flip | |
-| `SKILL.md` is the nine protocol sections and nothing else | `awk '{print length}' \| sort -n \| tail -1` ≤ 80 **first**, then `wc -l` ≤ 240; `grep '^## '` equals the agreed list; `git grep -n 'Changing this skill\|^## Language\|^## Evidence'` empty | Two, and the width check exists because the second was observed: a 220-line file reached by cutting protocol rather than the usage block, which the heading list catches; and a file reached by reflowing 76-column prose to 133, which `wc -l` alone cannot tell from a real cut | |
+| `SKILL.md` is the nine protocol sections and nothing else | max prose line width ≤ 80 **first** (`awk 'NR>4 && $0 !~ /^\|/ && !/^```/ {print length}' \| sort -n \| tail -1`, excluding frontmatter, table rows and fences), then `wc -l` ≤ 323; `grep '^## '` equals the agreed list; `git grep -n 'Changing this skill\|^## Language\|^## Evidence'` empty | Two, and the width check exists because the second was observed: a 220-line file reached by cutting protocol rather than the usage block, which the heading list catches; and a file reached by reflowing 76-column prose to 133, which `wc -l` alone cannot tell from a real cut | |
 | `dely wait` reports `ATTENTION` for a killed worker and for nothing healthy | Checklist row 4; plus a healthy worker and a settled worker producing no `ATTENTION`, and the ~1–2 s starting transient producing none | 0.19.0's `wait`, measured silent for 6 min 8 s on this Orca build; and a guard-less fix, which fires on every dispatch's startup transient | |
 | `log.jsonl` is one JSON object per line and records a failed run | After a real dispatch and after a deliberately failed one, `jq -c . ~/.dely/log.jsonl` parses every line and `jq -r '.event'` contains `dispatch`, `settled` and a failure event; every line has `ts`, `run`, `repo`, `sha`, `orca` | A logger that pretty-prints one object across lines, or one that writes only on success: the file exists and per-line parse or the failure event is missing | |
 | The log stays opt-in | With `~/.dely/` absent, a full dispatch creates neither the directory nor the file | A logger using `mkdir -p`: the run succeeds and the directory appears | |

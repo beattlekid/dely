@@ -100,14 +100,25 @@ trust steps, permission defaults and instructions-file rule are read from
 `harnesses.json`. A harness is added or moved between `supported` and
 `deferred` by editing that file, not the skill.
 
-**`SKILL.md` keeps its protocol and drops its transcriptions.** It is about 220
-lines: the two gates and Control, shape and acceptance, the execution
-envelope, Orca and the helper, implementation and handoff, review and
-remediation, release, and a failure table holding only rows that result
-handling does not already carry. Plan Mode and Investigation are one sentence
-each. Evidence, Changing this skill, and Language are deleted. The log section
-is three lines. The `dely` usage block is deleted, because `dely` prints its
-own usage.
+**`SKILL.md` keeps its protocol and drops its transcriptions.** It holds the
+two gates and Control, shape and acceptance, the execution envelope, Orca and
+the helper, implementation and handoff, review and remediation, release, and a
+failure table holding only rows that result handling does not already carry.
+Plan Mode and Investigation are one sentence each. Evidence, Changing this
+skill, and Language are deleted. The log section is three lines. The `dely`
+usage block is deleted, because `dely` prints its own usage.
+
+The 2026-09-15 review estimated this at about 220 lines, summing a per-section
+budget of 217. Measured after the cut, at the 80-column prose every other file
+in this repository uses, it is **323 lines** — against 445 at baseline, with
+words down 25% from 3624 to 2712 and no prose line over 78. The estimate was
+not wrong about what to delete; it undercounted what one section must hold.
+"Orca and the helper" was budgeted 45 lines for the run-create, preflight,
+dispatch, wait and result-handling sequence, and it also has to carry the
+prompt-file rules, the rule that a dispatch prompt reproduces an acceptance row
+as written, the model-and-effort pinning rule, and escalate-rather-than-guess.
+It measures 82. The protocol is the contract and the budget was an estimate, so
+the number moves and the contract does not.
 
 **The log is JSON Lines, records failures, and stays opt-in.** `~/.dely/log.jsonl`,
 one JSON object per line. The helper writes `preflight`, `dispatch` (with
