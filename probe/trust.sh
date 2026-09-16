@@ -78,9 +78,13 @@ screen() {
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write((((JSON.parse(s).result||{}).terminal||{}).tail||[]).join("\n"))}catch(e){}})'
 }
 
+# Claude has reworded this dialog at least once, so match several of its parts
+# rather than one sentence. This only decides when to answer; whether the answer
+# took is decided by the store, below.
+dialog='do you trust|trust the files|quick safety check|security guide|no, exit'
 seen=
 for _ in $(seq 1 30); do
-  if screen | grep -qi 'do you trust\|trust the files'; then seen=1; break; fi
+  if screen | grep -qiE "$dialog"; then seen=1; break; fi
   sleep 2
 done
 if [ -z "$seen" ]; then
