@@ -77,6 +77,16 @@ function loadHarnesses() {
   return _harnesses;
 }
 
+function effortRequiresModel() {
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(HARNESSES_PATH, "utf8"));
+  } catch (_) {
+    return true;
+  }
+  return raw && raw.effortRequiresModel !== false;
+}
+
 function harnessById(id) {
   return loadHarnesses().find((h) => h.id === id);
 }
@@ -192,8 +202,17 @@ function start(repo, run, p, spec, title) {
     "--agent",
     p.agent,
   ];
-  if (p.modelFlag && p.model !== "default") args.push("--model", p.model);
-  if (p.effortFlag && p.effort !== "default") args.push("--effort", p.effort);
+  const wantsModel = p.modelFlag && p.model !== "default";
+  const wantsEffort = p.effortFlag && p.effort !== "default";
+  if (effortRequiresModel() && wantsEffort && !wantsModel) {
+    return {
+      error:
+        "effort " + p.effort + " pinned with model default for " + p.agent +
+        "; --effort requires --model, so set a model or set effort to default",
+    };
+  }
+  if (wantsModel) args.push("--model", p.model);
+  if (wantsEffort) args.push("--effort", p.effort);
   const r = orca(args);
   const id = r.result && r.result.dispatchId;
   if (!id) {
@@ -466,7 +485,9 @@ function wait(f) {
     // transient; completed+release is a settled worker awaiting release.
     const act = rows.filter((w) => {
       const proj = w.projection || {};
-      const kind = (proj.nextAction || {}).kind;
+      // An absent optional field is an absent field, not a value: a row with
+      // no projection, or a projection with no nextAction, is not attention.
+      const kind = (proj.nextAction || {}).kind || "none";
       const needs = (proj.attention || {}).requiresAction === true;
       return w.dispatchStatus === "dispatched" && (kind !== "none" || needs);
     });

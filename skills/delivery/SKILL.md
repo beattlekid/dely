@@ -151,8 +151,17 @@ the turn (a waker Control never runs `dely wait`); **unsupported** cannot
 be Control.
 
 **Result handling.** `SETTLED`: process the batch, do the guide's completion
-accounting, and acknowledge. `ATTENTION`: follow `nextAction` and skip that
-id next time. `STALLED`: read the output, then wait again or recover.
+accounting, and acknowledge. `ATTENTION` has two routes, and the difference
+is whether the plane can still see the worker. With `nextAction.kind` other
+than `none`, run the argv Orca printed and skip that id next time. With
+`nextAction: none` and `attention.requiresAction`, the plane has lost sight
+of the worker rather than asked for something: read it with `worker-read`
+and `worker-show`, and if the process is gone, `worker-stop`, then
+`worker-abandon` when the stop reports `stop_unknown`, then
+`worker-release`, then one fresh `dely dispatch` with the same prompt file.
+A second time on the same input goes to the human. An absent `nextAction` is
+absent, not `none` with attention — that row is not `ATTENTION` and the wait
+continues. `STALLED`: read the output, then wait again or recover.
 `NO_ACK`: run setup's `dely preflight`, then one fresh `dely dispatch` with
 the same prompt file; never retry into the same terminal, and never reuse a
 settled terminal; a second failure on the same input goes to the human.
@@ -305,7 +314,9 @@ accepts.
 
 Maintenance logging is machine-local and opt-in at `~/.dely/log.jsonl`. It
 stays opt-in on the presence of `~/.dely/` and is never created by Dely.
-Control records each closed delivery, including one that stopped early.
+Control closes a delivery with `dely log --run <run> --json '<object>'`,
+after release or when it stops early, rather than assembling a line by hand.
+`dely` with no arguments prints which copy is running, and its usage.
 
 ## Failure and recovery
 

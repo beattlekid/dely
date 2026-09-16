@@ -1,7 +1,5 @@
 {
-  "agentUnconfiguredBinaries": ["agy", "kiro-cli", "cursor-agent"],
   "effortRequiresModel": true,
-  "modelsWithoutModelFlag": "Orca's per-agent default arguments",
   "harnesses": [
     {
       "name": "Claude Code",
@@ -18,7 +16,9 @@
       "modelFlag": true,
       "effortFlag": true,
       "permissionDefault": "--dangerously-skip-permissions",
-      "forbiddenHeadless": ["claude -p"],
+      "forbiddenHeadless": [
+        "claude -p"
+      ],
       "instructionsFile": {
         "file": "CLAUDE.md",
         "readsAgentsMd": false,
@@ -43,12 +43,16 @@
       "modelFlag": true,
       "effortFlag": true,
       "permissionDefault": "--dangerously-bypass-approvals-and-sandbox",
-      "forbiddenHeadless": ["codex exec"],
+      "forbiddenHeadless": [
+        "codex exec"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
         "needsImport": false,
-        "inert": ["CLAUDE.md"]
+        "inert": [
+          "CLAUDE.md"
+        ]
       },
       "notes": "Codex CLI 0.154.0 shows its own trust dialog on a fresh directory ('Do you trust the contents of this directory?'), measured 2026-09-16 during the 0.19.0 checklist; trust is dialog, not orca-preflight. Control wakes by waker. Discovery: slugs with visibility hide are not offered; effort levels are supported_reasoning_levels on each slug, not one vocabulary per harness. Native AGENTS.md reader; CLAUDE.md is inert (not imported)."
     },
@@ -63,7 +67,9 @@
       "modelFlag": false,
       "effortFlag": false,
       "permissionDefault": "--permission-mode bypassPermissions",
-      "forbiddenHeadless": ["grok --prompt-file"],
+      "forbiddenHeadless": [
+        "grok --prompt-file"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
@@ -82,14 +88,19 @@
       "modelFlag": false,
       "effortFlag": false,
       "permissionDefault": "--dangerously-skip-permissions",
-      "forbiddenHeadless": ["agy -p", "agy --print"],
+      "forbiddenHeadless": [
+        "agy -p",
+        "agy --print"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
         "needsImport": false,
-        "doNotOffer": ["GEMINI.md"]
+        "doNotOffer": [
+          "GEMINI.md"
+        ]
       },
-      "notes": "Deferred. worker-start --agent agy returns agent_unconfigured; the id that resolves is antigravity. Control wakes by waker. 0.18.0 launched via an adopt path after output quiescence because a plain worker-start typed the prompt before the TUI was ready (0 of 4 on 2026-09-11); 0.19.0 deleted that path, so Antigravity workers no longer launch. Discovery while supported was agy models (TSV, offer the slug column) and effort low|medium|high from CLI help; some slugs already end in -high/-medium/-low — do not strip those suffixes. Native AGENTS.md; do not offer GEMINI.md. Root plugin.json is the agy package (name and description only; additionalProperties false). Install is agy plugin install of the git URL or a local path; the CLI has no plugin update. Do not write ~/.gemini."
+      "notes": "Deferred. worker-start --agent agy returns agent_unconfigured; the id that resolves is antigravity. Control wakes by waker. 0.18.0 launched via an adopt path after output quiescence because a plain worker-start typed the prompt before the TUI was ready (0 of 4 on 2026-09-11); 0.19.0 deleted that path, so Antigravity workers no longer launch. Discovery while supported was agy models (TSV, offer the slug column) and effort low|medium|high from CLI help; some slugs already end in -high/-medium/-low — do not strip those suffixes. Native AGENTS.md; do not offer GEMINI.md. Root plugin.json is the agy package (name and description only; additionalProperties false). Install is agy plugin install of the git URL or a local path; the CLI has no plugin update. Do not write ~/.gemini. worker-start --model does not support this id; models come from Orca's per-agent default arguments."
     },
     {
       "name": "Kiro CLI",
@@ -102,13 +113,15 @@
       "modelFlag": false,
       "effortFlag": false,
       "permissionDefault": "none",
-      "forbiddenHeadless": ["kiro-cli chat --no-interactive"],
+      "forbiddenHeadless": [
+        "kiro-cli chat --no-interactive"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
         "needsImport": false
       },
-      "notes": "Deferred. worker-start --agent kiro-cli returns agent_unconfigured; the id that resolves is kiro. Control wake is unsupported. permissionDefault is none; --trust-all-tools is forbidden on the launch argv because it opens a confirmation whose default is No, exit, and Orca's Enter kills the session. Once the TUI is idle, /tools trust-all was observed to trust tools for the session with no confirmation dialog. Headless kiro-cli chat --no-interactive is not a Dely worker. Native AGENTS.md. Discovery while supported was kiro-cli chat --list-models --format json (offer each model_id) and effort from kiro-cli chat --help; live 2.16.2 may offer only auto. Install is npx skills targeting the kiro-cli agent at global scope. No workspace-trust surface (measured 2026-08-29; unconfirmed by the 2026-09-11 method that retracted the Claude result — re-measure before relying on it). Do not write ~/.kiro or create custom agents."
+      "notes": "Deferred. worker-start --agent kiro-cli returns agent_unconfigured; the id that resolves is kiro. Control wake is unsupported. permissionDefault is none; --trust-all-tools is forbidden on the launch argv because it opens a confirmation whose default is No, exit, and Orca's Enter kills the session. Once the TUI is idle, /tools trust-all was observed to trust tools for the session with no confirmation dialog. Headless kiro-cli chat --no-interactive is not a Dely worker. Native AGENTS.md. Discovery while supported was kiro-cli chat --list-models --format json (offer each model_id) and effort from kiro-cli chat --help; live 2.16.2 may offer only auto. Install is npx skills targeting the kiro-cli agent at global scope. No workspace-trust surface (measured 2026-08-29; unconfirmed by the 2026-09-11 method that retracted the Claude result — re-measure before relying on it). Do not write ~/.kiro or create custom agents. worker-start --model does not support this id; models come from Orca's per-agent default arguments."
     },
     {
       "name": "Cursor Agent CLI",
@@ -125,12 +138,17 @@
       "modelFlag": true,
       "effortFlag": false,
       "permissionDefault": "--force",
-      "forbiddenHeadless": ["cursor-agent -p", "cursor-agent --print"],
+      "forbiddenHeadless": [
+        "cursor-agent -p",
+        "cursor-agent --print"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
         "needsImport": false,
-        "alsoApplies": ["CLAUDE.md"]
+        "alsoApplies": [
+          "CLAUDE.md"
+        ]
       },
       "notes": "worker-start --model pin honoured; omit --effort (there is no effort flag; write the literal default). worker-start --agent cursor-agent returns agent_unconfigured; the id that resolves is cursor. Offer the model slug before ' - '. Do not invent an effort vocabulary, strip effort suffixes from slugs, or synthesize parameterized [effort=…] forms. Native AGENTS.md reader; the CLI also applies CLAUDE.md as a rule, so that file is not inert, but the import write offer stays on entries with needsImport. Never PATH agent (collides with Grok). Never -w/--worktree. Do not put --trust or an unpinned --sandbox on the launch argv."
     },
@@ -145,12 +163,17 @@
       "modelFlag": false,
       "effortFlag": false,
       "permissionDefault": "--allow-all",
-      "forbiddenHeadless": ["copilot -p", "copilot --prompt"],
+      "forbiddenHeadless": [
+        "copilot -p",
+        "copilot --prompt"
+      ],
       "instructionsFile": {
         "file": "AGENTS.md",
         "readsAgentsMd": true,
         "needsImport": false,
-        "alsoApplies": ["CLAUDE.md"]
+        "alsoApplies": [
+          "CLAUDE.md"
+        ]
       },
       "notes": "Deferred. Control wakes by background. --allow-all is the documented equivalent of --allow-all-tools --allow-all-paths --allow-all-urls, with --yolo as its alias. No non-interactive model listing: copilot models fails with Invalid command format; copilot -p \"/model\" dispatched a real turn (auto-routed to claude-haiku-4.5). An unavailable --model value prints Using \"auto\" instead and continues. Effort while supported was from copilot --help: none|minimal|low|medium|high|xhigh|max. Native AGENTS.md and CLAUDE.md reader (--no-custom-instructions disables both). Trust: Confirm folder trust still opens with --allow-all (1. Yes preselected; never 2, which remembers the folder). Restore interrupted sessions then lists sessions from other folders; Esc starts fresh, Enter is a wrong-session hazard. Measured 2026-08-31 on Copilot CLI 1.0.82: Orca documented no copilot launcher id, so Control composed copilot --allow-all --effort high by hand. Install uses existing manifests into ~/.copilot/installed-plugins/dely/dely/; no sidecar. worker-start --model does not support this id; models come from Orca's per-agent default arguments."
     }

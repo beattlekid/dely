@@ -147,10 +147,18 @@ happens to start, and fails here.
 
 The signal is Orca's, not Dely's. `dely wait` reports `ATTENTION` when
 `dispatchStatus` is `dispatched` and either `nextAction.kind` is not `none`
-or `projection.attention.requiresAction` is true. That projection has
-already changed shape between Orca releases, so record the Orca version
-next to the result, and when this row fails, check the projection
-directly before blaming the helper.
+or `projection.attention.requiresAction` is true. An absent `nextAction` is
+absent rather than `none`, and is not `ATTENTION`.
+
+This row exercises the second of the skill's two `ATTENTION` routes: the
+killed worker has `nextAction: none`, so there is no argv to run. Control
+checks it with `worker-read` and `worker-show`, and with the process gone
+runs `worker-stop`, then `worker-abandon` when the stop reports
+`stop_unknown`, then `worker-release`, then one fresh `dely dispatch` with
+the same prompt file. That is the "again exactly once" in the pass
+condition. That projection has already changed shape between Orca releases,
+so record the Orca version next to the result, and when this row fails,
+check the projection directly before blaming the helper.
 
 Measured on Orca 1.4.203 during this delivery's design:
 

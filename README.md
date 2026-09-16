@@ -169,8 +169,11 @@ loop. `dely preflight` runs in setup, and again after `NO_ACK`. After
 `DISPATCHED`, Control waits by the harness Control wake: `background`
 runs `dely wait`; `waker` runs `dely wait-bg` as its last command and
 ends the turn. It never acts on an Orca nudge. `SETTLED` hands over the
-batch; `ATTENTION` redispatches; `STALLED` is read then waited or
-recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE` is a checkpoint
+batch; `ATTENTION` with a `nextAction` other than `none` runs the argv Orca
+printed, and `ATTENTION` with `nextAction: none` and `requiresAction` means
+the plane lost sight of the worker — check it, stop, abandon and release it,
+then dispatch the same prompt file once more; `STALLED` is read then waited
+or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE` is a checkpoint
 (`worker-list` and last output; wait again if progressing; a second
 `DEADLINE` with no progress goes to the human); `ERROR` goes to the
 human.

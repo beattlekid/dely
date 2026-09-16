@@ -90,6 +90,13 @@ themselves; every harness's plugin cache holds the whole repository, verified
 2026-09-16 for the Claude, Cursor and Codex caches, so the root path resolves.
 Codex's `trust` is `dialog`, not `orca-preflight`.
 
+`effortRequiresModel` is the one fact kept above the per-harness entries, and
+it is enforced rather than stored: `start()` refuses a pin that names an effort
+while leaving the model at `default`, because `--effort` requires `--model` and
+that combination otherwise fails inside `worker-start` after a terminal already
+exists. Two other top-level fields the first cut carried were removed, their
+content stated in the entries it belongs to.
+
 `permissionDefault` is carried although the 2026-09-15 review's field list
 omitted it: setup's trust step and `probe/checklist.md` both launch
 `<binary> <permissionDefault>`, and deleting `harnesses.md` leaves that fact
@@ -110,8 +117,10 @@ usage block is deleted, because `dely` prints its own usage.
 
 The 2026-09-15 review estimated this at about 220 lines, summing a per-section
 budget of 217. Measured after the cut, at the 80-column prose every other file
-in this repository uses, it is **323 lines** — against 445 at baseline, with
-words down 25% from 3624 to 2712 and no prose line over 78. The estimate was
+in this repository uses, it is **334 lines** — against 445 at baseline, with
+words down 22% from 3624 to 2842 and no prose line over 78. (It was 323 at
+`698dc28`; the remediation added the two `ATTENTION` routes and the `dely log`
+sentence.) The estimate was
 not wrong about what to delete; it undercounted what one section must hold.
 "Orca and the helper" was budgeted 45 lines for the run-create, preflight,
 dispatch, wait and result-handling sequence, and it also has to carry the
@@ -166,9 +175,23 @@ attention when its `dispatchStatus` is `dispatched` **and** either
 `nextAction.kind` is not `none` **or** `attention.requiresAction` is true. The
 `dispatchStatus` guard is load-bearing in both directions: without it the
 1–2 s starting transient raises `ATTENTION` on every healthy dispatch, and a
-settled worker's `nextAction: release` does the same. Row 4 of
-`probe/checklist.md` keeps its pass criterion; its explanatory text names the
-field.
+settled worker's `nextAction: release` does the same. An **absent**
+`nextAction.kind` counts as `none`: a row with no projection, or a projection
+carrying no `nextAction`, is a field Orca did not supply rather than a demand
+for attention, and treating it as one regressed against 0.19.0 until the
+independent review caught it. A row whose `nextAction` is absent but whose
+`requiresAction` is true is still attention — the killed-worker signal does
+not depend on the other field existing.
+
+`ATTENTION` therefore has two routes, and the skill states both. A
+`nextAction` other than `none` is a request from the plane, and Control runs
+the argv it printed. `nextAction: none` with `requiresAction` is the plane
+losing sight of the worker: Control reads it with `worker-read` and
+`worker-show`, and with the process gone runs `worker-stop`, then
+`worker-abandon` when the stop reports `stop_unknown`, then `worker-release`,
+then one fresh `dely dispatch` with the same prompt file; a second time on the
+same input goes to the human. Row 4 of `probe/checklist.md` keeps its pass
+criterion and exercises the second route.
 
 #### Alternatives considered
 
