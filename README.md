@@ -92,32 +92,6 @@ such as `v0.17.0` or an exact full commit SHA. There is no
 `codex plugin update`: use `codex plugin marketplace upgrade`. Do not use
 `codex plugin install`.
 
-### Grok Build
-
-```bash
-grok plugin install hieuphung97/dely
-
-grok plugin list                   # verify it is installed
-grok plugin update dely            # update
-grok plugin uninstall dely         # uninstall
-```
-
-`grok plugin install` takes a git URL, GitHub shorthand, or local path.
-Pin with `@tag`, for example `hieuphung97/dely@v0.17.0`. A local directory
-needs `--trust`.
-
-### Antigravity CLI
-
-```bash
-agy plugin install https://github.com/hieuphung97/dely.git
-
-agy plugin list                    # verify it is installed
-agy plugin install https://github.com/hieuphung97/dely.git  # refresh: no `plugin update` subcommand
-agy plugin uninstall dely          # uninstall
-```
-
-`agy plugin install` takes a git URL or a local path.
-
 ### Cursor Agent CLI
 
 ```bash
@@ -151,35 +125,6 @@ entry and leaves the plugin installed.
 
 Type `/dely` to filter the palette to Dely's `/delivery` and `/setup`.
 
-### GitHub Copilot CLI
-
-```bash
-copilot plugin marketplace add https://github.com/hieuphung97/dely.git
-copilot plugin install dely@dely
-
-copilot plugin list                 # verify it is installed
-copilot plugin update dely          # update
-copilot plugin uninstall dely       # uninstall
-copilot plugin marketplace remove dely  # removes the marketplace, not the plugin
-```
-
-### Kiro CLI
-
-```bash
-npx skills add hieuphung97/dely --agent kiro-cli --global --skill delivery --skill setup
-
-npx skills list --agent kiro-cli --global    # verify it is installed
-npx skills update --global                   # update
-npx skills remove --agent kiro-cli --global --skill delivery --skill setup  # uninstall
-```
-
-`npx skills add` also writes `~/.agents/skills` (Codex and Copilot load it)
-and `~/.kiro/skills`. Update or remove both copies. Compare
-`skills/delivery/SKILL.md` by hash with the installed file before assuming
-the plugin version is the one that runs.
-
-Invoke the skills in a Kiro CLI session as `/delivery` and `/setup`.
-
 ### Checked versions
 
 These are the versions this README's commands were last locally checked
@@ -187,14 +132,10 @@ against — observations, not a promised minimum:
 
 | Tool | Checked version |
 | --- | --- |
-| Claude Code | 2.1.245 |
-| Codex CLI | 0.149.1 |
-| Grok Build | 1.0.5 |
-| Antigravity CLI | 1.1.19 |
-| Kiro CLI | 2.16.2 |
-| Cursor Agent CLI | 2026.08.25-3e8eec8 |
-| GitHub Copilot CLI | 1.0.83 |
-| Orca | 1.4.200 |
+| Claude Code | 2.1.273 |
+| Codex CLI | 0.154.0 |
+| Cursor Agent CLI | 2026.09.10-fd3934a |
+| Orca | 1.4.203 |
 
 ## How Dely works
 
@@ -220,10 +161,12 @@ The workflow contract is [`skills/delivery/SKILL.md`](skills/delivery/SKILL.md).
 - **`dely:delivery` stops immediately.** Orca is not running or a required
   capability is absent, including orchestration. Run the Quickstart
   preflight, then retry.
-- **A stale copy from `npx skills add` shadows a newer plugin.** Codex and
-  Copilot also load `~/.agents/skills`; Kiro loads `~/.kiro/skills`. Compare
-  `skills/delivery/SKILL.md` by hash with the copy in those directories,
-  then update or remove the shadowing install.
+- **A stale skills copy shadows a newer plugin.** Codex also loads
+  `~/.agents/skills`, and a copy left there — or a symlink to it from
+  `~/.claude/skills` — wins over the plugin. Compare
+  `skills/delivery/SKILL.md` by hash with the copy in those directories, then
+  update or remove the shadowing install. The plugin version is not evidence
+  about which file runs; the hash is.
 - **Codex still behaves the same after `codex plugin marketplace upgrade`.**
   Confirm the remote has new commits. A delivery already running keeps the
   plugin version from its start; open a new session after the upgrade.
