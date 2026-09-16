@@ -70,7 +70,10 @@ cannot express.
   from Orca's own projection instead of from dialog strings: a dispatch whose
   `stage.worker` reads `start_unknown` is dropped with the worker's screen
   quoted. On an untrusted Claude pin that projection was measured flipping at
-  about 41 s, against about 150 s for the timeout it replaces.
+  about 41 s, and the refusal it produces was measured at 56 s. The classifier
+  it replaces managed 39 s, and the timeout that was briefly the only path left
+  took 192 s. So this costs 17 s against the classifier, and that is the price
+  paid to stop matching dialog strings.
 - **Install and discovery name the harnesses this release supports.** Grok
   Build, Antigravity CLI, Kiro CLI and GitHub Copilot CLI keep their measured
   launch mechanics in `skills/delivery/references/harnesses.md`; they lose their
@@ -88,8 +91,17 @@ cannot express.
   script reported success twice from the screen while
   `projects[<path>].hasTrustDialogAccepted` stayed false. Dely itself still
   never answers a dialog, and no skill references `probe/`.
-- **This release verified rows 1, 4, 5 and 7.** The other rows are the next
-  release's floor, not this one's.
+- **This release ran rows 1, 4, 5 and 7, and three of them passed.** Rows 1, 5
+  and 7 passed. Row 4 ran and failed, on Orca 1.4.203, for a reason in the
+  execution plane: a worker killed after its acknowledgement had a dead process
+  and a terminal back at a shell prompt, while the `worker-list` projection kept
+  reporting `terminalState: "active"`, `stage.worker: "ready"` and
+  `nextAction: "none"` for 6 minutes and 8 seconds, so `dely wait` had nothing
+  to report and went on waiting. The same case measured 16 s to `ATTENTION` on
+  Orca 1.4.200, and `wait`'s `ATTENTION` path is unchanged from 0.18.0 — the
+  whole function differs by one hunk, the removal of the adopted-terminal close
+  after `SETTLED`. Rows 2, 3 and 6 were not run. Running four of seven rows is
+  an exception recorded here, not the standard: the floor is all seven.
 
 #### Alternatives considered
 

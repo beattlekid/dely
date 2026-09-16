@@ -36,9 +36,29 @@ rm -rf "$snap" && mkdir -p "$snap"
 git -C <checkout> archive "$sha" | tar -x -C "$snap"
 ```
 
-Install from `$snap` with the commands the README gives, for Claude Code,
-Codex CLI and Cursor Agent CLI. Cursor reads the Claude plugin cache, which was
-measured during the 2026-09-14 probe rounds; confirm it rather than assuming it.
+Install from `$snap` with the commands the README gives, for Claude Code and
+Codex CLI. Watch the Codex marketplace: `codex plugin marketplace add` was
+observed keeping a stale marketplace of the same name, installing the previous
+version, and reporting success. Remove the marketplace and the plugin, then add
+and install again.
+
+**There is no snapshot install for Cursor Agent CLI.** `cursor-agent plugin
+marketplace add` takes a git URL only — a local path is refused — and installing
+what it indexes needs the interactive `/plugin` panel. Cursor reads the Claude
+plugin cache, measured during the 2026-09-14 probe rounds, so a Cursor row runs
+on the Claude install; confirm that rather than assuming it. It only holds once
+every older Cursor copy is gone or already matches the snapshot hash:
+
+```bash
+find ~/.cursor/plugins/cache/dely \
+     ~/.cursor/plugins/marketplaces/github.com/hieuphung97/dely \
+     -name SKILL.md -path '*delivery*' -exec shasum -a 256 {} + 2>/dev/null
+```
+
+Anything there with a different hash wins over the Claude cache. Until it is
+removed or refreshed, a row with Cursor in any role cannot run, and saying so is
+the correct outcome for that row — not running it against whatever Cursor has.
+On 2026-09-16 two such copies blocked every Cursor row of the 0.19.0 release.
 
 Then verify by hash, at every location that can serve the skill:
 
@@ -102,9 +122,12 @@ a human had to act and why, wall time, and per-phase time.
 **Pass:** the branch is on the remote, the review disposition is `ACCEPT`, and
 no human acted.
 
-Row 1 is the release floor. Rows 2 and 3 rotate which harness is Control,
-implementer and reviewer; run them when the release changes anything about a
-launch, and at least once per release series.
+All three rows run for a release. Rows 2 and 3 rotate which harness is Control,
+implementer and reviewer, and a rotation is the only thing that exercises a
+harness in a role it does not hold in row 1. The release floor is all seven
+rows, not row 1: a release that ran fewer says so in its decision record and
+names which rows it skipped. The 0.19.0 release did exactly that — it ran rows
+1, 4, 5 and 7 only — and recorded the exception rather than moving the floor.
 
 ## Step 4 — row 4, a worker that dies after it acknowledges
 

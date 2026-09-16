@@ -73,8 +73,11 @@ fi
 cleanup() { orca terminal close --terminal "$handle" --json >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+# --screen renders the frame. Without it a read returns accumulated output,
+# which a TUI leaves as stacked fragments, and an empty tail once a previous
+# read has consumed the cursor.
 screen() {
-  orca terminal read --terminal "$handle" --json |
+  orca terminal read --terminal "$handle" --screen --json |
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write((((JSON.parse(s).result||{}).terminal||{}).tail||[]).join("\n"))}catch(e){}})'
 }
 
