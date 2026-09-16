@@ -2,6 +2,7 @@
 "use strict";
 
 const { execFileSync } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -51,7 +52,8 @@ function flags(argv) {
   return f;
 }
 
-const HARNESSES_PATH = path.resolve(__dirname, "../../../harnesses.json");
+const PACKAGE_ROOT = path.resolve(__dirname, "../../..");
+const HARNESSES_PATH = path.join(PACKAGE_ROOT, "harnesses.json");
 
 let _harnesses;
 function loadHarnesses() {
@@ -60,16 +62,16 @@ function loadHarnesses() {
   try {
     raw = fs.readFileSync(HARNESSES_PATH, "utf8");
   } catch (e) {
-    out("ERROR cannot read " + HARNESSES_PATH + ": " + (e.message || e), 9);
+    fail("cannot read " + HARNESSES_PATH + ": " + (e.message || e));
   }
   let data;
   try {
     data = JSON.parse(raw);
   } catch (e) {
-    out("ERROR cannot parse " + HARNESSES_PATH + ": " + (e.message || e), 9);
+    fail("cannot parse " + HARNESSES_PATH + ": " + (e.message || e));
   }
   if (!data || !Array.isArray(data.harnesses)) {
-    out("ERROR " + HARNESSES_PATH + " has no harnesses array", 9);
+    fail(HARNESSES_PATH + " has no harnesses array");
   }
   _harnesses = data.harnesses;
   return _harnesses;
@@ -90,10 +92,90 @@ function pin(repo, phase) {
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const USAGE =
+  "usage: dely preflight|dispatch|wait|wait-bg|notify | log --run ID --json OBJ";
 const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
 };
+
+let _sha;
+function delySha() {
+  if (_sha !== undefined) return _sha;
+  try {
+    _sha = String(
+      execFileSync("git", ["-C", PACKAGE_ROOT, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    ).trim();
+    if (!_sha) _sha = null;
+  } catch (_) {
+    _sha = null;
+  }
+  return _sha;
+}
+
+let _orcaVer;
+function orcaVersion() {
+  if (_orcaVer !== undefined) return _orcaVer;
+  try {
+    _orcaVer = ((orca(["status"]).result || {}).runtime || {}).appVersion || null;
+  } catch (_) {
+    _orcaVer = null;
+  }
+  return _orcaVer;
+}
+
+// Append one JSON object to ~/.dely/log.jsonl when that directory already
+// exists. Never mkdir. A write failure must not change exit, print, or flow.
+function logEvent(event, extra) {
+  extra = extra || {};
+  try {
+    if (!fs.statSync(path.join(os.homedir(), ".dely")).isDirectory()) return;
+    const rec = {
+      ts: new Date().toISOString(),
+      run: extra.run == null ? null : extra.run,
+      repo: extra.repo == null ? null : extra.repo,
+      sha: delySha(),
+      orca: orcaVersion(),
+      event,
+    };
+    for (const k of Object.keys(extra)) {
+      if (k in rec) continue;
+      rec[k] = extra[k];
+    }
+    fs.appendFileSync(path.join(os.homedir(), ".dely", "log.jsonl"), JSON.stringify(rec) + "\n");
+  } catch (_) {
+    /* observer */
+  }
+}
+
+function fail(reason, extra) {
+  logEvent("error", Object.assign({ reason }, extra || {}));
+  out("ERROR " + reason, 9);
+}
+
+function printIdentity() {
+  let version = "unknown";
+  try {
+    version = JSON.parse(
+      fs.readFileSync(path.join(PACKAGE_ROOT, ".claude-plugin/plugin.json"), "utf8")
+    ).version;
+  } catch (_) {
+    /* missing or unreadable */
+  }
+  let skill = "unreadable";
+  try {
+    skill = crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(path.join(PACKAGE_ROOT, "skills/delivery/SKILL.md")))
+      .digest("hex");
+  } catch (_) {
+    /* missing */
+  }
+  console.log("dely " + version + " sha " + (delySha() || "null") + " sha256 " + skill);
+}
 
 function start(repo, run, p, spec, title) {
   const args = [
@@ -161,8 +243,12 @@ function screenLines(id) {
   return [];
 }
 
+function screenText(id) {
+  return screenLines(id).join("\n");
+}
+
 function lastText(id) {
-  return clip(screenLines(id).join("\n"));
+  return clip(screenText(id));
 }
 
 function preflight(f) {
@@ -177,11 +263,29 @@ function preflight(f) {
   for (const p of uniq) {
     const s = start(f.repo, f.run, p, spec, "preflight-" + p.phase);
     if (s.error) {
+      logEvent("preflight", {
+        run: f.run,
+        repo: f.repo,
+        phase: p.phase,
+        agent: p.agent,
+        result: "FAIL",
+        seconds: 0,
+        reason: "start: " + s.error,
+      });
       out("PREFLIGHT " + p.phase + " " + p.agent + " FAIL start: " + s.error);
       failed++;
     } else open[s.id] = Object.assign({ messaged: false }, p);
   }
   const drop = (id, rec, line) => {
+    logEvent("preflight", {
+      run: f.run,
+      repo: f.repo,
+      phase: rec.phase,
+      agent: rec.agent,
+      result: "FAIL",
+      seconds: Math.round((Date.now() - t0) / 1000),
+      reason: line.replace(/^PREFLIGHT \S+ \S+ FAIL /, ""),
+    });
     out(line);
     orca(["orchestration", "worker-stop", "--dispatch", id]);
     orca(["orchestration", "worker-release", "--dispatch", id]);
@@ -224,7 +328,16 @@ function preflight(f) {
         const hit = Object.keys(open).find((id) => namesDispatch(m, id));
         if (hit) open[hit].messaged = true;
         if (hit && m.type === "worker_done") {
-          out("PREFLIGHT " + open[hit].phase + " " + open[hit].agent + " PASS " + Math.round((Date.now() - t0) / 1000) + "s");
+          const secs = Math.round((Date.now() - t0) / 1000);
+          logEvent("preflight", {
+            run: f.run,
+            repo: f.repo,
+            phase: open[hit].phase,
+            agent: open[hit].agent,
+            result: "PASS",
+            seconds: secs,
+          });
+          out("PREFLIGHT " + open[hit].phase + " " + open[hit].agent + " PASS " + secs + "s");
           orca(["orchestration", "worker-release", "--dispatch", hit]);
           delete open[hit];
         }
@@ -245,19 +358,34 @@ function dispatch(f) {
     fs.readFileSync(path.resolve(f.repo, f["spec-file"]), "utf8") +
     "\n\nFirst action, before anything else: send a heartbeat with subject `ack`. The Orca preamble and this spec file are everything the worker needs; read no other skill.";
   const s = start(f.repo, f.run, p, spec, f.phase);
-  if (s.error) out("FAILED " + s.error, 5);
+  if (s.error) {
+    logEvent("error", { run: f.run, repo: f.repo, reason: s.error });
+    out("FAILED " + s.error, 5);
+  }
   const interval = Math.max(20, Math.min(5000, Math.floor(POLL_S * 1000)));
   const t0 = Date.now();
   for (; Date.now() - t0 < ACK_S * 1000; sleep(interval)) {
     const peek = orca(["orchestration", "check", "--peek", "--run", f.run]);
-    if (((peek.result || {}).messages || []).some((m) => namesDispatch(m, s.id))) out("DISPATCHED " + s.id, 0);
+    if (((peek.result || {}).messages || []).some((m) => namesDispatch(m, s.id))) {
+      logEvent("dispatch", {
+        run: f.run,
+        repo: f.repo,
+        phase: p.phase,
+        agent: p.agent,
+        dispatchId: s.id,
+        seconds: Math.round((Date.now() - t0) / 1000),
+      });
+      out("DISPATCHED " + s.id, 0);
+    }
     const row = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).find((w) => w.dispatchId === s.id);
     if (row && row.dispatchStatus === "failed") break;
   }
-  const why = lastText(s.id);
+  const raw = screenText(s.id);
+  const secs = Math.round((Date.now() - t0) / 1000);
   orca(["orchestration", "worker-stop", "--dispatch", s.id]);
   orca(["orchestration", "worker-release", "--dispatch", s.id]);
-  out("NO_ACK " + s.id + " stopped after " + Math.round((Date.now() - t0) / 1000) + "s; last output: " + why, 4);
+  logEvent("no_ack", { run: f.run, repo: f.repo, dispatchId: s.id, seconds: secs, text: raw });
+  out("NO_ACK " + s.id + " stopped after " + secs + "s; last output: " + clip(raw), 4);
 }
 
 function advance(track, id) {
@@ -304,13 +432,18 @@ function wait(f) {
       "--timeout-ms",
       String(Math.max(1, Math.floor(POLL_S * 1000))),
     ]);
-    if (r.ok === false) out("ERROR " + ((r.error && r.error.message) || "check failed"), 9);
+    if (r.ok === false) fail((r.error && r.error.message) || "check failed", { run: f.run });
     const res = r.result || {};
     if (res.deliveryId) {
       const msgs = res.messages || [];
       if (msgs.some((m) => ["worker_done", "escalation", "question"].includes(m.type))) {
-        console.log(
-          JSON.stringify({
+        logEvent("settled", {
+          run: f.run,
+          deliveryId: res.deliveryId,
+          messages: msgs.map((m) => ({ type: m.type, subject: m.subject })),
+        });
+        out(
+          {
             SETTLED: res.deliveryId,
             messages: msgs.map((m) => ({
               id: m.id,
@@ -319,9 +452,9 @@ function wait(f) {
               subject: m.subject,
               payload: m.payload,
             })),
-          })
+          },
+          0
         );
-        process.exit(0);
       }
       orca(["orchestration", "check", ...as, "--run", f.run, "--ack", res.deliveryId]);
       continue;
@@ -329,21 +462,23 @@ function wait(f) {
     const rows = ((orca(["orchestration", "worker-list", "--run", f.run]).result || {}).workers || []).filter(
       (w) => !skip.includes(w.dispatchId)
     );
+    // dispatched is load-bearing: pending+requiresAction is the start
+    // transient; completed+release is a settled worker awaiting release.
     const act = rows.filter((w) => {
-      const kind = ((w.projection || {}).nextAction || {}).kind;
-      return kind && kind !== "none";
+      const proj = w.projection || {};
+      const kind = (proj.nextAction || {}).kind;
+      const needs = (proj.attention || {}).requiresAction === true;
+      return w.dispatchStatus === "dispatched" && (kind !== "none" || needs);
     });
     if (act.length) {
-      out(
-        {
-          ATTENTION: act.map((w) => ({
-            dispatchId: w.dispatchId,
-            liveness: w.projection.liveness,
-            nextAction: w.projection.nextAction,
-          })),
-        },
-        8
-      );
+      const payload = act.map((w) => ({
+        dispatchId: w.dispatchId,
+        liveness: (w.projection || {}).liveness,
+        nextAction: (w.projection || {}).nextAction,
+        attention: (w.projection || {}).attention,
+      }));
+      logEvent("attention", { run: f.run, workers: payload });
+      out({ ATTENTION: payload }, 8);
     }
     if (Date.now() - lastProgressCheck < PROGRESS_S * 1000) continue;
     lastProgressCheck = Date.now();
@@ -352,7 +487,15 @@ function wait(f) {
       const rec = track[w.dispatchId] || {};
       if (!rec.error && rec.source !== "transcript") continue;
       if (idle >= stallMin) {
+        const raw = screenText(w.dispatchId);
         const why = rec.error ? rec.error : "no new output for " + Math.floor(idle) + " min";
+        logEvent("stalled", {
+          run: f.run,
+          dispatchId: w.dispatchId,
+          idleMinutes: Math.floor(idle),
+          liveness: (w.projection || {}).liveness,
+          text: raw,
+        });
         out(
           "STALLED " +
             w.dispatchId +
@@ -361,18 +504,19 @@ function wait(f) {
             "; liveness " +
             JSON.stringify((w.projection || {}).liveness) +
             "; last output: " +
-            lastText(w.dispatchId),
+            clip(raw),
           6
         );
       }
     }
   }
+  logEvent("deadline", { run: f.run });
   out("DEADLINE", 7);
 }
 
 function waitBg(f) {
   const me = process.env.ORCA_TERMINAL_HANDLE;
-  if (!me) out("ERROR not inside an Orca terminal", 9);
+  if (!me) fail("not inside an Orca terminal", { run: f.run });
   const file = path.resolve(f.out || path.join(os.tmpdir(), "dely-wait-" + f.run + ".out"));
   const lock = file + ".lock";
   const recorded = () => {
@@ -399,6 +543,7 @@ function waitBg(f) {
     fs.writeFileSync(lock, JSON.stringify({ terminal: "" }), { flag: "wx" });
   } catch (_) {
     if (live(recorded())) {
+      logEvent("wait_bg", { run: f.run, which: "ALREADY_WAITING", path: file });
       out("ALREADY_WAITING: a dely wait is running for this Run; end your turn, it will wake you.", 0);
     }
     writeLock("");
@@ -447,9 +592,10 @@ function waitBg(f) {
     } catch (_) {
       /* lock */
     }
-    out("ERROR " + ((r.error && r.error.message) || "terminal create failed"), 9);
+    fail((r.error && r.error.message) || "terminal create failed", { run: f.run });
   }
   writeLock((r.result && r.result.terminal && r.result.terminal.handle) || "");
+  logEvent("wait_bg", { run: f.run, which: "WAITING", path: file });
   out("WAITING", 0);
 }
 
@@ -461,25 +607,53 @@ function notify(f) {
   const giveUpMs = NOTIFY_GIVEUP_S * 1000;
   for (const t0 = Date.now(); ; ) {
     const r = orca(["terminal", "send", "--terminal", to, "--text", text, "--enter"]);
-    if (r.ok !== false) return;
+    if (r.ok !== false) {
+      logEvent("notify", { run: f.run, target: to, result: "sent" });
+      return;
+    }
     const msg = (r.error && r.error.message) || "";
-    if (!/agent_prompt_blocked/.test(msg)) return;
+    if (!/agent_prompt_blocked/.test(msg)) {
+      logEvent("notify", { run: f.run, target: to, result: "failed" });
+      return;
+    }
     const left = giveUpMs - (Date.now() - t0);
-    if (left <= 0) process.exit(1);
+    if (left <= 0) {
+      logEvent("notify", { run: f.run, target: to, result: "gave_up" });
+      process.exit(1);
+    }
     sleep(Math.min(retryMs, left));
   }
 }
 
+function logCmd(f) {
+  let payload;
+  try {
+    payload = JSON.parse(f.json);
+  } catch (e) {
+    fail("cannot parse --json: " + (e.message || e), { run: f.run });
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    fail("--json must be an object", { run: f.run });
+  }
+  logEvent("delivery", Object.assign({}, payload, { run: f.run, repo: f.repo || payload.repo || null }));
+  process.exit(0);
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
-const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify };
+const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd };
 const need = {
   preflight: ["repo", "run"],
   dispatch: ["repo", "run", "phase", "spec-file"],
   wait: ["run", "control"],
   "wait-bg": ["run", "control"],
   notify: ["run", "out"],
+  log: ["run", "json"],
 };
-if (!table[cmd]) out("usage: dely preflight|dispatch|wait|wait-bg|notify", 2);
+if (!cmd) {
+  printIdentity();
+  out(USAGE, 0);
+}
+if (!table[cmd]) out(USAGE, 2);
 const f = flags(rest);
-if (need[cmd].some((k) => !f[k])) out("usage: dely preflight|dispatch|wait|wait-bg|notify", 2);
+if (need[cmd].some((k) => !f[k])) out(USAGE, 2);
 table[cmd](f);
