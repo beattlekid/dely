@@ -152,7 +152,11 @@ worker needs and that it should read no other skill.
 
 **Files.** `skills/delivery/SKILL.md`, `skills/delivery/scripts/dely.js`.
 
-**Focused verification.** `wc -l skills/delivery/SKILL.md` ≤ 240;
+**Focused verification.** Line width first — every other prose file in this
+repository sits at a 90th-percentile line length of 75 to 82 columns, so
+`awk '{print length}' skills/delivery/SKILL.md | sort -n | tail -1` must be
+≤ 80. A line count is only meaningful at a fixed wrap. Then
+`wc -l skills/delivery/SKILL.md` ≤ 240;
 `grep '^## ' skills/delivery/SKILL.md` equal to the nine headings above;
 `git grep -n 'Changing this skill' -- skills/delivery/SKILL.md` and
 `git grep -nE '^## (Language|Evidence)' -- skills/delivery/SKILL.md` empty;
@@ -247,7 +251,7 @@ to `0.19.0` must fail the version gate, and restoring
 | --- | --- | --- | --- |
 | `harnesses.json` is the only home for harness facts | `jq -e` seven-entry field check; `git grep -nE 'dangerously-skip\|dangerously-bypass\|--force\|bypassPermissions\|cursor-agent models\|codex debug models\|claude -p\|--trust-all-tools' -- skills/` empty | A `harnesses.json` added while setup and `SKILL.md` keep their hardcoded lists: the `jq` check passes, the grep fails | |
 | The helper resolves the wake mode from the file, not a literal | `dely wait --run X --control codex` prints `REFUSED … wakes by waker`; with `controlWake` flipped to `background` in a scratch copy of `harnesses.json`, it does not refuse | A helper keeping a `{claude:background, codex:waker}` map: passes the first call, ignores the flip | |
-| `SKILL.md` is the nine protocol sections and nothing else | `wc -l` ≤ 240; `grep '^## '` equals the agreed list; `git grep -n 'Changing this skill\|^## Language\|^## Evidence'` empty | A 220-line file reached by cutting protocol rather than the usage block: the line count passes, the heading list fails | |
+| `SKILL.md` is the nine protocol sections and nothing else | `awk '{print length}' \| sort -n \| tail -1` ≤ 80 **first**, then `wc -l` ≤ 240; `grep '^## '` equals the agreed list; `git grep -n 'Changing this skill\|^## Language\|^## Evidence'` empty | Two, and the width check exists because the second was observed: a 220-line file reached by cutting protocol rather than the usage block, which the heading list catches; and a file reached by reflowing 76-column prose to 133, which `wc -l` alone cannot tell from a real cut | |
 | `dely wait` reports `ATTENTION` for a killed worker and for nothing healthy | Checklist row 4; plus a healthy worker and a settled worker producing no `ATTENTION`, and the ~1–2 s starting transient producing none | 0.19.0's `wait`, measured silent for 6 min 8 s on this Orca build; and a guard-less fix, which fires on every dispatch's startup transient | |
 | `log.jsonl` is one JSON object per line and records a failed run | After a real dispatch and after a deliberately failed one, `jq -c . ~/.dely/log.jsonl` parses every line and `jq -r '.event'` contains `dispatch`, `settled` and a failure event; every line has `ts`, `run`, `repo`, `sha`, `orca` | A logger that pretty-prints one object across lines, or one that writes only on success: the file exists and per-line parse or the failure event is missing | |
 | The log stays opt-in | With `~/.dely/` absent, a full dispatch creates neither the directory nor the file | A logger using `mkdir -p`: the run succeeds and the directory appears | |
@@ -271,7 +275,10 @@ other harness or platform.
 
 `NEEDS_REPLAN` if cutting `SKILL.md` to the nine sections cannot hold the two
 gates, the acceptance counterexample rule, and review independence. Those are
-the protocol; the line budget is not.
+the protocol; the line budget is not. The budget is also not a reason to
+rewrap: a line count measured at a wrap this repository does not use measures
+nothing, and reporting an honest number above 240 is the correct outcome where
+the protocol will not compress further.
 
 `BLOCKED` if `attention.requiresAction` does not reproduce on the candidate as
 it did during design — that is an execution-plane change, not something to work
