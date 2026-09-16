@@ -143,12 +143,16 @@ default is an unpinned environment: it lives in the harness's own config,
 it changes without announcing itself, and the dispatch that relies on it
 looks identical to one that pinned the same value deliberately.
 
-**Never act on an Orca nudge.** After `DISPATCHED`, wait by wake mode:
-**background** runs `dely wait --run <run> --control <agent>` as a
-background command and ends the turn; **waker** runs
-`dely wait-bg --run <run> --control <agent>` as its last command, then ends
-the turn (a waker Control never runs `dely wait`); **unsupported** cannot
-be Control.
+**Never act on an Orca nudge.** After `DISPATCHED`, wait by the wake mode
+of **this Control's own harness** — not the harness of the worker being
+waited on. `--control` is this session's harness id, the same id whatever
+worker is in flight. **background** runs
+`dely wait --run <run> --control <self>` as a background command and ends
+the turn; **waker** runs `dely wait-bg --run <run> --control <self>` as its
+last command, then ends the turn (a waker Control never runs `dely wait`);
+**unsupported** cannot be Control. The helper reads the harness of the Orca
+terminal it runs in and refuses a waker even when `--control` names another
+one, so `REFUSED … (called with --control …)` means use `wait-bg`.
 
 **Result handling.** `SETTLED`: process the batch, do the guide's completion
 accounting, and acknowledge. `ATTENTION` has two routes, and the difference

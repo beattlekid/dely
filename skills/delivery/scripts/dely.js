@@ -429,10 +429,28 @@ function advance(track, id) {
   return (Date.now() - t.at) / 60000;
 }
 
+// The harness this process is actually running in, read from the Orca terminal
+// that launched it. --control is what the caller says it is; this is what it is.
+// Measured on Orca 1.4.203: a Codex Control passed --control cursor and
+// --control claude, naming the workers it waited on, and a guard that trusted
+// the flag let a waker Control run a blocking wait. Null outside Orca.
+function selfHarness() {
+  const me = process.env.ORCA_TERMINAL_HANDLE;
+  if (!me) return null;
+  const terms = ((orca(["terminal", "list"]).result || {}).terminals || []);
+  const t = terms.find((x) => x && x.handle === me);
+  return (t && t.agentIdentity) || null;
+}
+
 function wait(f) {
-  const wake = (harnessById(f.control) || {}).controlWake || "unknown";
-  if (wake !== "background" && process.env.DELY_WAITER !== "1") {
-    out("REFUSED " + f.control + " wakes by " + wake + "; use dely wait-bg", 3);
+  if (process.env.DELY_WAITER !== "1") {
+    const self = selfHarness();
+    const who = self || f.control;
+    const wake = (harnessById(who) || {}).controlWake || "unknown";
+    if (wake !== "background") {
+      const said = self && self !== f.control ? " (called with --control " + f.control + ")" : "";
+      out("REFUSED " + who + " wakes by " + wake + said + "; use dely wait-bg", 3);
+    }
   }
   const deadline = Date.now() + Number(f["timeout-min"] || 60) * 60000;
   const stallMin = Number(f["stall-min"] || 10);

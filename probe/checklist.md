@@ -124,7 +124,11 @@ Collect: the SHA on the remote, the disposition in the handoff, how many times
 a human had to act and why, wall time, and per-phase time.
 
 **Pass:** the branch is on the remote, the review disposition is `ACCEPT`, and
-no human acted.
+no human acted. For the row whose Control wakes by `waker`, the log must also
+carry `wait_bg` and `notify` events for that Run. Without them the row passed
+without exercising the path it exists to test: on `82aa354` a Codex Control
+reached `ACCEPT` with a blocking `dely wait`, and branch, disposition and
+human count could not tell.
 
 All three rows run for a release. Rows 2 and 3 rotate which harness is Control,
 implementer and reviewer, and a rotation is the only thing that exercises a

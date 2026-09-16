@@ -117,10 +117,10 @@ usage block is deleted, because `dely` prints its own usage.
 
 The 2026-09-15 review estimated this at about 220 lines, summing a per-section
 budget of 217. Measured after the cut, at the 80-column prose every other file
-in this repository uses, it is **334 lines** — against 445 at baseline, with
-words down 22% from 3624 to 2842 and no prose line over 78. (It was 323 at
-`698dc28`; the remediation added the two `ATTENTION` routes and the `dely log`
-sentence.) The estimate was
+in this repository uses, it is **338 lines** — against 445 at baseline, with
+2904 words against 3624 and no prose line over 78. (It was 323 at `698dc28`;
+the review remediation added the two `ATTENTION` routes and the `dely log`
+sentence, and the live-verification fix below added the `--control` rule.) The estimate was
 not wrong about what to delete; it undercounted what one section must hold.
 "Orca and the helper" was budgeted 45 lines for the run-create, preflight,
 dispatch, wait and result-handling sequence, and it also has to carry the
@@ -192,6 +192,35 @@ losing sight of the worker: Control reads it with `worker-read` and
 then one fresh `dely dispatch` with the same prompt file; a second time on the
 same input goes to the human. Row 4 of `probe/checklist.md` keeps its pass
 criterion and exercises the second route.
+
+**The waker guard reads the harness it runs in, not the one it is told.**
+Found by live verification of `82aa354`, not by review. `SKILL.md` wrote
+`dely wait --run <run> --control <agent>` without saying whose agent. In
+checklist row 3 on Orca 1.4.203, a Codex Control — wake mode `waker` — passed
+`--control cursor` while waiting on its Cursor implementer and
+`--control claude` while waiting on its Claude reviewer, zero times its own id,
+per its own session record. The guard looked up the wake mode of the id it was
+given, found `background`, and let a waker Control run a blocking in-turn
+`wait`: the failure `wait-bg` exists to prevent, since Codex yields exec after
+at most 30 s with no wake on exit. Row 3 still reached `ACCEPT` only because
+both phases finished in about two minutes.
+
+`wait` now resolves `ORCA_TERMINAL_HANDLE` through `orca terminal list` to that
+terminal's `agentIdentity`, and refuses a waker on that identity whatever
+`--control` says, naming both in the refusal. `--control` remains the fallback
+outside Orca and when the handle is unknown; the `wait-bg` waiter still passes
+with `DELY_WAITER=1`. The mechanism was measured before it was written: in rows
+1, 2 and 3 each Run's `coordinator_handle` equalled its Control's terminal,
+which `run-create` can only bind if `ORCA_TERMINAL_HANDLE` was set inside the
+Control's command environment, and the Codex terminal reported
+`agentIdentity: "codex"`. The skill now also says `--control` is this
+Control's own id.
+
+It is recorded as a finding of the verification rather than folded silently
+into the review remediation because the release floor let it through: rows 1
+to 3 pass on branch, `ACCEPT` and human count, and none of those can see which
+wait a Control used. Checklist step 3 now requires a waker Control's row to
+show `wait_bg` and `notify` in the log for its Run.
 
 #### Alternatives considered
 
