@@ -4,7 +4,7 @@ Decision record: `docs/decisions.md`, entry
 "2026-09-16 — Harness facts move to `harnesses.json`, the skill keeps only its
 protocol, and the log becomes machine-readable".
 
-**Baseline:** the SHA of the commit carrying the decision record and this plan.
+**Baseline:** `6736331` — the commit carrying the decision record and this plan.
 
 ## Goal
 
