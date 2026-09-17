@@ -68,6 +68,10 @@ find ~/.claude/plugins ~/.claude/skills ~/.agents/skills ~/.codex ~/.cursor \
   -name SKILL.md -path '*delivery*' -exec shasum -a 256 {} +
 ```
 
+`dely` with no arguments now prints the version, SHA and sha256 of
+`SKILL.md`, so a candidate can identify itself from inside whichever copy
+actually ran — a stronger check than hashing paths from outside.
+
 Include the marketplace source directory, not only the plugin cache. A Claude
 Control was observed running `scripts/dely` straight out of the marketplace
 path it was added from, so a cache that matches proves nothing on its own.
@@ -120,7 +124,11 @@ Collect: the SHA on the remote, the disposition in the handoff, how many times
 a human had to act and why, wall time, and per-phase time.
 
 **Pass:** the branch is on the remote, the review disposition is `ACCEPT`, and
-no human acted.
+no human acted. For the row whose Control wakes by `waker`, the log must also
+carry `wait_bg` and `notify` events for that Run. Without them the row passed
+without exercising the path it exists to test: on `82aa354` a Codex Control
+reached `ACCEPT` with a blocking `dely wait`, and branch, disposition and
+human count could not tell.
 
 All three rows run for a release. Rows 2 and 3 rotate which harness is Control,
 implementer and reviewer, and a rotation is the only thing that exercises a
@@ -131,23 +139,53 @@ names which rows it skipped. The 0.19.0 release did exactly that — it ran rows
 
 ## Step 4 — row 4, a worker that dies after it acknowledges
 
-Inside one of the rows above, after the implement worker has acknowledged, kill
-its agent process from outside Orca.
+Inside one of the rows above, after the implement worker has acknowledged
+**and** Control's own wait for that Run is running
+(`pgrep -f "dely.js wait --run <run>"` for a background Control, the
+`wait-bg` waiter for a waker one), kill the worker's agent process from outside
+Orca. An acknowledgement is logged a few seconds after launch, but Control may
+not start waiting for another 20 s while it finishes its turn; a kill in that
+window measures Control's turn, not the helper. On `90fc7a9` a kill 4 s after
+the `dispatch` event read 34 s to `ATTENTION`, of which 18 s passed before any
+wait existed.
 
 **Pass:** Control reports `ATTENTION` within 30 s and dispatches the same task
-again exactly once.
+again exactly once. Expect about one `POLL_S` (15 s) plus a round-trip from the
+start of the wait: `wait` blocks in `check --wait` before it reads
+`worker-list`. Measured 16 s from wait start on Orca 1.4.203 and 1.4.204, and
+8 s from a kill 8 s into the wait.
 
 This is the row that catches a helper which prints `DISPATCHED` without ever
 waiting for the acknowledgement: such a helper passes row 1 whenever the worker
 happens to start, and fails here.
 
-The signal is Orca's, not Dely's: `dely wait` reports `ATTENTION` when a
-`worker-list` row carries a `projection.nextAction` other than `none`. That
-projection has already changed between Orca releases, so record the Orca
-version next to the result, and when this row fails, check the projection
-directly before blaming the helper. A row whose `terminalState` stays `active`
-and whose `nextAction` stays `none` while the agent process is gone is an
-execution-plane finding, not a Dely one.
+The signal is Orca's, not Dely's. `dely wait` reports `ATTENTION` when
+`dispatchStatus` is `dispatched` and either `nextAction.kind` is not `none`
+or `projection.attention.requiresAction` is true. An absent `nextAction` is
+absent rather than `none`, and is not `ATTENTION`.
+
+This row exercises the second of the skill's two `ATTENTION` routes: the
+killed worker has `nextAction: none`, so there is no argv to run. Control
+checks it with `worker-read` and `worker-show`, and with the process gone
+runs `worker-stop`, then `worker-abandon` when the stop reports
+`stop_unknown`, then `worker-release`, then one fresh `dely dispatch` with
+the same prompt file. That is the "again exactly once" in the pass
+condition. That projection has already changed shape between Orca releases,
+so record the Orca version next to the result, and when this row fails,
+check the projection directly before blaming the helper.
+
+Measured on Orca 1.4.203 during this delivery's design:
+
+| Worker state | `dispatchStatus` | `liveness.verdict` | `nextAction.kind` | `attention.requiresAction` |
+| --- | --- | --- | --- | --- |
+| Healthy, working (45 samples over 92 s) | `dispatched` | `live` | `none` | `false` |
+| Killed after acknowledgement (from ≤1 s, held ≥132 s) | `dispatched` | `unverifiable` / `missing_status` | `none` | `true` |
+| Settled, awaiting release | `completed` | `live` | `release` | `false` |
+| Starting, ~1–2 s transient | `pending` | `unverifiable` | `none` | `true` |
+
+`worker-show`'s `observation.status` and the terminal's `connected` flag
+were both measured against the killed worker and neither moves, so
+neither is a substitute.
 
 ## Step 5 — row 5, a pin that has not answered its dialog
 
@@ -155,7 +193,13 @@ Use a path that no harness has trusted — a new directory each time, never
 `r1` to `r3` — with a Claude Code pin, and run `dely preflight` inside a Run.
 
 **Pass:** `PREFLIGHT … FAIL` in under 60 s, the printed `last output` contains
-the dialog text, and `orca terminal list` shows nothing left behind.
+at least one line of the dialog, and `orca terminal list` shows nothing left
+behind. One line is enough, and on Claude Code it is often only the tail: Orca's
+prompt delivery presses Enter into the dialog, where `No, exit` is preselected,
+so Claude has exited to a shell before the helper reads the last 400
+characters. On `90fc7a9` the quote held `Security guide`, a line of that
+dialog and one `probe/trust.sh` matches on; `harnesses.json` records the
+mechanism.
 
 The quote is the point, not the verdict. A failure that arrives on time with an
 empty quote tells the human nothing, and that is exactly how this failed before
@@ -188,10 +232,23 @@ Setup:
 
 Steps and their pass conditions:
 
-1. Control starts the delivery and reaches its first preflight. **Pass:**
-   within 60 s Control has stopped on a message naming the harness, the path,
-   and what the human must do; `orca orchestration worker-list` shows the
-   preflight dispatch released; `orca terminal list` has no leftover terminal.
+1. Control starts the delivery and dispatches the implementer, which cannot
+   acknowledge behind Claude's dialog. From 0.20.0 a delivery does not
+   preflight first, so the sequence is `NO_ACK` after `ACK_S` (60 s), then one
+   `dely preflight` that fails the Claude pin. The clock starts at the Run's
+   `no_ack` event: a dispatch that never acknowledges writes `no_ack`, not
+   `dispatch`. **Pass:** within 150 s of the `no_ack` event, the log for the
+   Run shows a `preflight` failing the Claude pin and Control has stopped on a
+   message naming the harness, the path, and what the human must do; there is
+   exactly one `no_ack` before that `preflight` and **no `dispatch` after
+   it**; `orca orchestration worker-list` shows every dispatch released;
+   `orca terminal list` has no leftover terminal. Measured on `b8094bf`: 63 s
+   from the dispatch to `no_ack`, 79 s more to the failing `preflight` — a
+   Control turn and a 56 s preflight — and 25 s more to the stop, 104 s from
+   `no_ack`. The 150 s leaves room for a slower Control turn. On `90fc7a9`,
+   whose skill had lost the `PREFLIGHT … FAIL` route, Control dispatched a
+   second time into the same dialog and stopped about 4 min after the first
+   dispatch.
 2. Act as the human: `probe/trust.sh ~/dely-probe/t-<sha>`. It opens Claude in
    an Orca terminal, answers the dialog, verifies
    `projects[<path>].hasTrustDialogAccepted` in `~/.claude.json`, and closes

@@ -18,6 +18,7 @@ https://github.com/user-attachments/assets/83ec539a-6551-4807-8517-0c73e5d171d7
 - [Project setup](#project-setup)
 - [Install](#install)
 - [How Dely works](#how-dely-works)
+- [Log](#log)
 - [Troubleshooting](#troubleshooting)
 
 ## Quickstart
@@ -65,6 +66,11 @@ The plugin is `dely`, from the `dely` marketplace at
 `https://github.com/hieuphung97/dely.git`. The skill name is `delivery`;
 invoke it as `dely:delivery`. The runtime needs Node 18 or newer on PATH.
 
+Three harnesses are supported today: Claude Code, Codex CLI, and Cursor
+Agent CLI. That list is not closed. `harnesses.json` at the repository
+root carries four more as `deferred`: GitHub Copilot CLI, Antigravity
+CLI, Grok Build, and Kiro CLI.
+
 ### Claude Code
 
 ```bash
@@ -75,6 +81,11 @@ claude plugin list                 # verify it is installed
 claude plugin update dely          # update (restart required to apply)
 claude plugin uninstall dely       # uninstall
 ```
+
+A Claude Code Control was observed running `scripts/dely` straight out of
+the marketplace source directory it was added from, not from
+`~/.claude/plugins/cache`. A hash check that covers only the cache proves
+nothing; it must cover every location that can serve the skill.
 
 ### Codex CLI
 
@@ -92,6 +103,11 @@ such as `v0.17.0` or an exact full commit SHA. There is no
 `codex plugin update`: use `codex plugin marketplace upgrade`. Do not use
 `codex plugin install`.
 
+`codex plugin marketplace add` was observed keeping a stale marketplace of
+the same name, installing the previous version, and reporting success. A
+harness reporting a successful install is not evidence. To refresh, remove
+the marketplace and the plugin, then add and install again.
+
 ### Cursor Agent CLI
 
 ```bash
@@ -107,6 +123,11 @@ cursor-agent plugin marketplace update dely
 cursor-agent plugin marketplace remove dely
 cursor-agent plugin marketplace add https://github.com/hieuphung97/dely.git
 ```
+
+Cursor Agent CLI cannot install from a local snapshot:
+`cursor-agent plugin marketplace add` takes a git URL only, and installing
+what it indexes needs the interactive `/plugin` panel. It reads the Claude
+plugin cache; a Cursor copy with a different hash wins over that cache.
 
 The snapshot is addressed by commit, so `marketplace update` only re-indexes
 and does not fetch. Remove and re-add the marketplace to pick up new commits,
@@ -144,17 +165,31 @@ different session reviews, then opens a PR. You merge. A Spike investigates
 only — no delivery run.
 
 Control loads `orca skills get orchestration` and follows that supervised
-loop. `dely preflight` checks each distinct pin once before the first
-`dely dispatch`. After `DISPATCHED`, Control waits by the harness Control
-wake: `background` runs `dely wait`; `waker` runs `dely wait-bg` as its
-last command and ends the turn. It never acts on an Orca nudge. `SETTLED`
-hands over the batch; `ATTENTION` follows `nextAction`; `STALLED` is read
-then waited or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE` is a
-checkpoint (`worker-list` and last output; wait again if progressing; a
-second `DEADLINE` with no progress goes to the human); `ERROR` goes to the
+loop. `dely preflight` runs in setup, and again after `NO_ACK`. After
+`DISPATCHED`, Control waits by the harness Control wake: `background`
+runs `dely wait`; `waker` runs `dely wait-bg` as its last command and
+ends the turn. It never acts on an Orca nudge. `SETTLED` hands over the
+batch; `ATTENTION` with a `nextAction` other than `none` runs the argv Orca
+printed, and `ATTENTION` with `nextAction: none` and `requiresAction` means
+the plane lost sight of the worker — check it, stop, abandon and release it,
+then dispatch the same prompt file once more; `STALLED` is read then waited
+or recovered; `NO_ACK` and `FAILED` retry once; `DEADLINE` is a checkpoint
+(`worker-list` and last output; wait again if progressing; a second
+`DEADLINE` with no progress goes to the human); `ERROR` goes to the
 human.
 
 The workflow contract is [`skills/delivery/SKILL.md`](skills/delivery/SKILL.md).
+
+## Log
+
+`~/.dely/log.jsonl` is machine-local JSON Lines, one object per line. It
+is off unless `~/.dely/` exists; `mkdir ~/.dely` turns it on, and Dely
+never creates that directory. A missing directory means nothing is
+written and nothing is created.
+
+The file may contain sensitive content. It quotes worker screen output
+in full, so it can hold repository contents, error text, and whatever a
+harness printed.
 
 ## Troubleshooting
 
@@ -163,10 +198,14 @@ The workflow contract is [`skills/delivery/SKILL.md`](skills/delivery/SKILL.md).
   preflight, then retry.
 - **A stale skills copy shadows a newer plugin.** Codex also loads
   `~/.agents/skills`, and a copy left there — or a symlink to it from
-  `~/.claude/skills` — wins over the plugin. Compare
-  `skills/delivery/SKILL.md` by hash with the copy in those directories, then
-  update or remove the shadowing install. The plugin version is not evidence
-  about which file runs; the hash is.
+  `~/.claude/skills` — wins over the plugin. Claude Code was observed
+  running `scripts/dely` from the marketplace source directory, not from
+  `~/.claude/plugins/cache`. Cursor Agent CLI reads the Claude plugin
+  cache, and a Cursor copy with a different hash wins over it. Compare
+  `skills/delivery/SKILL.md` by hash at every location that can serve the
+  skill, including marketplace source directories, then update or remove
+  the shadowing install. A harness reporting a successful install is not
+  evidence of which copy ran; the hash is.
 - **Codex still behaves the same after `codex plugin marketplace upgrade`.**
   Confirm the remote has new commits. A delivery already running keeps the
   plugin version from its start; open a new session after the upgrade.

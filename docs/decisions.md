@@ -9,6 +9,337 @@ Last updated 2026-09-16.
 
 ## Settled
 
+### 2026-09-16 — Harness facts move to `harnesses.json`, the skill keeps only its protocol, and the log becomes machine-readable
+
+#### Context
+
+0.19.0 deleted what the 2026-09-15 architecture review found unearned: the
+structural suite, the CI job, and the code for four harnesses this package
+cannot support. It deleted; it did not redesign. What it left behind has four
+measured problems.
+
+**Harness facts live in prose that only a human can read.**
+`skills/delivery/references/harnesses.md` is a seven-row Markdown table, and
+`dely.js` reads it with `harnessCell()`, which splits a Markdown line on `|`
+and indexes column 6 to find a Control wake mode. `skills/setup/SKILL.md`
+does not read it at all: it restates the same facts as prose, hardcoding
+`claude`, `codex` and `cursor-agent`, their discovery commands, and which of
+them needs a `CLAUDE.md` import. The same fact is therefore written in three
+places, and 0.19.0 shipped with one of them already wrong — the table says
+Codex's setup step is `Orca preflight`, while Codex CLI 0.154.0 shows its own
+trust dialog on a fresh directory ("Do you trust the contents of this
+directory?"). Measured 2026-09-16 during the 0.19.0 checklist.
+
+**`SKILL.md` is 445 lines, and its largest section is a copy of something the
+helper already prints.** "Launching a worker" is 113 lines of `dely` usage
+text, transcribing exit codes and flag semantics that `dely` itself owns. A
+transcription cannot be checked against its source, and it is the part of the
+file most likely to drift. Three further sections — Evidence, Changing this
+skill, Language — state policy no dispatch ever consults. Measured on the
+0.18.0 probe rounds: a Cursor worker read `SKILL.md` three times in one
+delivery and `dely.js` three times, because the skill is long enough that a
+worker re-reads it rather than holding it.
+
+**The log is opt-in, human-formatted, and was empty when it was needed.**
+0.19.0 appends one tab-separated physical line to `~/.dely/log`, only after a
+delivery is accepted and all checks are green. Every failure the 0.18.0 and
+0.19.0 series actually had — lost nudge wakes, a verify blocking past Codex's
+30 s exec yield, a launch failing at 150 s with an empty quote, a killed
+worker invisible for 6 min — happened in a delivery that never reached that
+point, so none of them is in any log. The format is also declared not to be a
+parsing schema, which leaves an agent asked to debug a run with nothing to
+read.
+
+**`dely wait` cannot see a dead worker on the current execution plane.**
+Measured 2026-09-16 on Orca 1.4.203 during the 0.19.0 checklist: after a
+worker's agent process was killed, `worker-list` held `terminalState:
+active`, `stage.worker: ready` and `nextAction: none` for 6 min 8 s, so
+`wait` — which reports `ATTENTION` only on `nextAction.kind !== "none"` —
+reported nothing. The same case gave `ATTENTION` in 16 s on Orca 1.4.200.
+Checklist row 4 failed for that reason and the release recorded it as an
+execution-plane finding rather than a helper defect.
+
+This delivery re-measured it. On Orca 1.4.203, `worker-list` already carries
+the signal, in the same payload `wait` reads, in a field 0.19.0 does not
+consult:
+
+| Worker state | `dispatchStatus` | `liveness.verdict` | `nextAction.kind` | `attention.requiresAction` |
+| --- | --- | --- | --- | --- |
+| Healthy, working (45 samples over 92 s) | `dispatched` | `live` | `none` | `false` |
+| Killed after acknowledgement (from ≤1 s, held ≥132 s) | `dispatched` | `unverifiable` / `missing_status` | `none` | **`true`** |
+| Settled, awaiting release | `completed` | `live` | `release` | `false` |
+| Starting, ~1–2 s transient | `pending` | `unverifiable` | `none` | **`true`** |
+
+Two candidate signals proposed by the 0.19.0 review do not discriminate:
+`worker-show`'s `observation.status` stays `"live"` on a killed worker, and
+the terminal's `connected` stays `true` with `orphaned: false`. Both were
+checked against the killed worker above.
+
+#### Decision
+
+**One machine-readable file owns every harness fact.** `harnesses.json` at the
+repository root carries one entry per harness, with `id` (the Orca agent id),
+`binary`, `status` (`supported` or `deferred`), `controlWake`, `trust`,
+`discovery`, `modelFlag`, `effortFlag`, `permissionDefault`,
+`forbiddenHeadless`, `instructionsFile`, and `notes` carrying what was
+measured — including for `deferred` entries, which is where the facts about
+GitHub Copilot CLI, Antigravity CLI, Grok Build and Kiro CLI now live.
+`skills/delivery/references/harnesses.md` is deleted. The helper, `skills/setup`
+and `skills/delivery` all read `harnesses.json` by a path relative to
+themselves; every harness's plugin cache holds the whole repository, verified
+2026-09-16 for the Claude, Cursor and Codex caches, so the root path resolves.
+Codex's `trust` is `dialog`, not `orca-preflight`.
+
+`effortRequiresModel` is the one fact kept above the per-harness entries, and
+it is enforced rather than stored: `start()` refuses a pin that names an effort
+while leaving the model at `default`, because `--effort` requires `--model` and
+that combination otherwise fails inside `worker-start` after a terminal already
+exists. Two other top-level fields the first cut carried were removed, their
+content stated in the entries it belongs to.
+
+`permissionDefault` is carried although the 2026-09-15 review's field list
+omitted it: setup's trust step and `probe/checklist.md` both launch
+`<binary> <permissionDefault>`, and deleting `harnesses.md` leaves that fact
+no other home.
+
+**`skills/setup` states no harness-specific fact.** Its discovery commands,
+trust steps, permission defaults and instructions-file rule are read from
+`harnesses.json`. A harness is added or moved between `supported` and
+`deferred` by editing that file, not the skill.
+
+**`SKILL.md` keeps its protocol and drops its transcriptions.** It holds the
+two gates and Control, shape and acceptance, the execution envelope, Orca and
+the helper, implementation and handoff, review and remediation, release, and a
+failure table holding only rows that result handling does not already carry.
+Plan Mode and Investigation are one sentence each. Evidence, Changing this
+skill, and Language are deleted. The log section is three lines. The `dely`
+usage block is deleted, because `dely` prints its own usage.
+
+The 2026-09-15 review estimated this at about 220 lines, summing a per-section
+budget of 217. Measured after the cut, at the 80-column prose every other file
+in this repository uses, it is **346 lines** — against 445 at baseline, with
+3016 words against 3624 and no prose line over 78. (It was 323 at `698dc28`;
+the review remediation added the two `ATTENTION` routes and the `dely log`
+sentence, and the two live-verification fixes below added the `--control` rule
+and restored the `PREFLIGHT … FAIL` route.) The estimate was
+not wrong about what to delete; it undercounted what one section must hold.
+"Orca and the helper" was budgeted 45 lines for the run-create, preflight,
+dispatch, wait and result-handling sequence, and it also has to carry the
+prompt-file rules, the rule that a dispatch prompt reproduces an acceptance row
+as written, the model-and-effort pinning rule, and escalate-rather-than-guess.
+It measures 82. The protocol is the contract and the budget was an estimate, so
+the number moves and the contract does not.
+
+**The log is JSON Lines, records failures, and stays opt-in.** `~/.dely/log.jsonl`,
+one JSON object per line. The helper writes `preflight`, `dispatch` (with
+seconds to acknowledgement), `no_ack`, `settled`, `attention`, `stalled`,
+`deadline`, `error`, `wait_bg` and `notify`; Control writes one closing
+`delivery` object with shape, implementation rounds, dispositions, the pull
+request or pushed SHA, human interventions, and `stopped_at` when the delivery
+ended early. Every line carries `ts`, `run`, `repo`, the Dely SHA and the Orca
+version. Aborted and failed deliveries are recorded; that is the point.
+Screen quotes are written in full, because the file is machine-local. Dely
+never reads it to decide anything at runtime; an agent reads it when asked to
+debug or improve a run. `dely log` writes the closing object so Control does
+not hand-assemble JSON in a model turn.
+
+The trigger is unchanged from 0.19.0: Dely never creates `~/.dely/`, and a
+missing directory is skipped silently. **This supersedes the 2026-09-15
+review's decision 9, which made the log on by default.** That decision's
+reason — a log is empty exactly when you need it — is real, but it is weakest
+on the maintainer's own machine, where `mkdir ~/.dely` once turns it on
+permanently for every later run including the broken ones, and strongest
+against third-party installs, which would otherwise accumulate quoted screen
+contents on disk without being asked. An environment variable was rejected as
+the switch: the helper runs inside terminals Orca creates, which inherit the
+Orca application's environment rather than Control's shell, so `wait-bg`'s
+waiter would not see it. `README.md` states that the file may contain
+sensitive content.
+
+**Preflight leaves the per-delivery path.** It runs in `skills/setup`, and
+again after a dispatch returns `NO_ACK`. A delivery no longer preflights
+before its first dispatch.
+
+**The dispatch spec says the worker needs nothing else.** `dely dispatch`
+appends, alongside the acknowledgement instruction, a sentence stating that
+the Orca preamble and the spec file are sufficient and that no other skill
+should be read.
+
+**`dely` with no arguments prints its identity.** The version from the plugin
+manifest, the Dely SHA where one is resolvable, and the sha256 of
+`skills/delivery/SKILL.md`, in addition to the usage line. This is the
+check `probe/checklist.md` step 1 already performs by hand at every install
+location.
+
+**`dely wait` reports `ATTENTION` on the measured signal.** A worker needs
+attention when its `dispatchStatus` is `dispatched` **and** either
+`nextAction.kind` is not `none` **or** `attention.requiresAction` is true. The
+`dispatchStatus` guard is load-bearing in both directions: without it the
+1–2 s starting transient raises `ATTENTION` on every healthy dispatch, and a
+settled worker's `nextAction: release` does the same. An **absent**
+`nextAction.kind` counts as `none`: a row with no projection, or a projection
+carrying no `nextAction`, is a field Orca did not supply rather than a demand
+for attention, and treating it as one regressed against 0.19.0 until the
+independent review caught it. A row whose `nextAction` is absent but whose
+`requiresAction` is true is still attention — the killed-worker signal does
+not depend on the other field existing.
+
+`ATTENTION` therefore has two routes, and the skill states both. A
+`nextAction` other than `none` is a request from the plane, and Control runs
+the argv it printed. `nextAction: none` with `requiresAction` is the plane
+losing sight of the worker: Control reads it with `worker-read` and
+`worker-show`, and with the process gone runs `worker-stop`, then
+`worker-abandon` when the stop reports `stop_unknown`, then `worker-release`,
+then one fresh `dely dispatch` with the same prompt file; a second time on the
+same input goes to the human. Row 4 of `probe/checklist.md` keeps its pass
+criterion and exercises the second route.
+
+**The waker guard reads the harness it runs in, not the one it is told.**
+Found by live verification of `82aa354`, not by review. `SKILL.md` wrote
+`dely wait --run <run> --control <agent>` without saying whose agent. In
+checklist row 3 on Orca 1.4.203, a Codex Control — wake mode `waker` — passed
+`--control cursor` while waiting on its Cursor implementer and
+`--control claude` while waiting on its Claude reviewer, zero times its own id,
+per its own session record. The guard looked up the wake mode of the id it was
+given, found `background`, and let a waker Control run a blocking in-turn
+`wait`: the failure `wait-bg` exists to prevent, since Codex yields exec after
+at most 30 s with no wake on exit. Row 3 still reached `ACCEPT` only because
+both phases finished in about two minutes.
+
+`wait` now resolves `ORCA_TERMINAL_HANDLE` through `orca terminal list` to that
+terminal's `agentIdentity`, and refuses a waker on that identity whatever
+`--control` says, naming both in the refusal. `--control` remains the fallback
+outside Orca and when the handle is unknown; the `wait-bg` waiter still passes
+with `DELY_WAITER=1`. The mechanism was measured before it was written: in rows
+1, 2 and 3 each Run's `coordinator_handle` equalled its Control's terminal,
+which `run-create` can only bind if `ORCA_TERMINAL_HANDLE` was set inside the
+Control's command environment, and the Codex terminal reported
+`agentIdentity: "codex"`. The skill now also says `--control` is this
+Control's own id.
+
+It is recorded as a finding of the verification rather than folded silently
+into the review remediation because the release floor let it through: rows 1
+to 3 pass on branch, `ACCEPT` and human count, and none of those can see which
+wait a Control used. Checklist step 3 now requires a waker Control's row to
+show `wait_bg` and `notify` in the log for its Run.
+
+**A failed preflight stops dispatch again.** Also found by live verification,
+of `90fc7a9`. 0.19.0 stated a `PREFLIGHT … FAIL` route twice: do not dispatch
+to any pin, relay the reason, rerun preflight when the human is done. This
+record's cut of `SKILL.md` moved preflight off the delivery path and dropped
+that route with it; what remained was "`NO_ACK`: run setup's `dely preflight`,
+then one fresh `dely dispatch`", with no condition on the preflight. Neither
+the task 2 survival list nor the review of `698dc28` named it. In checklist
+row 7 on Orca 1.4.204 a Cursor Control did exactly what the text said: `NO_ACK`
+after 63 s, preflight failing the Claude pin on its trust dialog, then a second
+dispatch into the same dialog and a second `NO_ACK` 63 s later, before
+stopping. It still named the harness, the path and the action, and the rest
+of the loop — `trust.sh`, one message, a passing preflight in the same Run,
+`ACCEPT` — passed. The route is restored in result handling and the failure
+table, and a fresh dispatch after `NO_ACK` now depends on every pin passing.
+Checklist row 7's first step, written for 0.19.0's preflight-first flow and
+unable to finish in its 60 s as a result, now bounds the stop at 150 s from
+the Run's `no_ack` event — the first event a dispatch that never acknowledges
+writes — and requires a `preflight` failing the Claude pin and no `dispatch`
+after it. Measured on `b8094bf`: 63 s from the dispatch to `no_ack`, then 79 s
+to the failing preflight and 25 s to the stop, 104 s from `no_ack`. The bound
+this entry first carried, `ACK_S` plus 90 s from the first `dispatch` event,
+anchored on an event that case never writes and was corrected at re-review.
+
+Rows 1, 3 and 4 were not rerun for this change: their Runs logged no `no_ack`
+and no `preflight` event, so the route never lay on their path, and rows 5 and
+6 exercise only the helper, which this change does not touch. Rows 2 and 7 run
+on the commit that carries it.
+
+One Minor finding is recorded and deliberately not fixed. `preflight`'s printed
+and logged `seconds` start after `worker-start` returns, so they omit the launch
+— 15 logged against 56 s of wall time for an untrusted Claude pin. The placement
+is inherited from 0.19.0; moving it changes the helper and would reopen rows 5
+and 6.
+
+#### Alternatives considered
+
+**Keep `harnesses.md` and add a parser.** Rejected: the parse is the defect.
+`harnessCell()` indexes a fixed column of a Markdown table, so reordering the
+columns silently changes what the helper reads, and setup cannot use it at all
+without writing a second parser.
+
+**Put `harnesses.json` under `skills/delivery/`.** Rejected: `skills/setup`
+would then reach into a sibling skill for its own configuration, and the file
+describes the package rather than one skill.
+
+**Use `worker-show observation.status` or the terminal's `connected` flag for
+row 4**, as the 0.19.0 review suggested. Rejected on measurement: both stay
+unchanged when the agent process is killed, so neither discriminates. They are
+recorded here so the next reader does not re-propose them.
+
+**Debounce `attention.requiresAction` over two polls** instead of guarding on
+`dispatchStatus`. Rejected: it delays a real detection by a poll interval to
+solve a transient that the status field already excludes exactly.
+
+**On by default with a `~/.dely/log.off` marker.** Rejected with the
+superseded decision above: it logs on machines whose owner never asked, and
+the opt-out is discoverable only by reading documentation.
+
+#### Consequences
+
+Adding a harness is one JSON entry plus whatever install text `README.md`
+owes it; it is no longer an edit to two skills and a Markdown table.
+
+`SKILL.md` stops describing the helper's interface, so the helper's usage text
+becomes the only statement of it. A change to `dely`'s flags no longer has a
+second place to update, and no longer has a second place to contradict.
+
+The log now contains quoted screen output from every worker, including
+whatever a failing harness printed — credentials in a shell prompt, repository
+contents, error text. It is machine-local, it is not created unless the
+directory exists, and `README.md` says so. It is still a file a user may not
+expect to be able to share.
+
+This does not make row 4 pass on an Orca build that reports neither signal. It
+moves the helper onto the best field this build offers and names the field, so
+the next failure is diagnosable. `attention.requiresAction` is Orca's
+projection and has already changed shape once between 1.4.200 and 1.4.203;
+rows 1, 4 and 5 remain worth rerunning after every Orca upgrade.
+
+Removing preflight from the delivery path means an untrusted pin is now
+discovered by a dispatch returning `NO_ACK` rather than before the first
+dispatch. The cost is one wasted dispatch; the saving is one round trip on
+every delivery whose pins were already trusted, which is most of them.
+
+A hazard this delivery hit and did not fix: a Control that acknowledges a batch
+outside `dely wait` cannot use `orca orchestration check --peek` to decide
+whether anything is pending. `--peek` returns the messages but leaves
+`deliveryId` null, and only `check --wait` assigns one, so a drain loop keyed on
+`deliveryId` exits while a `worker_done` is still unacknowledged. The next
+`wait` then settles on that stale message, which is indistinguishable from the
+current worker finishing — it was caught here only by checking `worker-list`
+before acting on the result. Per-delivery Runs stop a stale report settling a
+different delivery's wait; nothing stops one settling a later wait in the same
+Run. The helper's own loop acks the `deliveryId` from `check --wait` and is not
+affected. Recorded rather than fixed because the fix belongs in the batch
+mechanics the orchestration guide owns, not in this delivery's scope.
+
+#### Non-goals
+
+Supporting the four deferred harnesses. Their measured facts are preserved in
+`harnesses.json` so that promoting one is an edit to `status` and its `notes`,
+but nothing in this delivery runs them.
+
+Making `harnesses.json` a public configuration surface for users. It is a
+package artifact; a project pins harnesses through `AGENTS.md`, as before.
+
+A schema file or a validator for `harnesses.json`. The closure gate parses it
+with `jq`; a malformed entry fails there.
+
+#### Deferred
+
+Promoting a deferred harness to `supported`. Trigger: a release that runs at
+least one checklist row with that harness in a role.
+
+A `~/.dely/config.json` for anything the directory marker cannot express.
+Trigger: a second setting that needs to be configured at all.
+
 ### 2026-09-16 — Dely drops its structural suite, its CI job, and the code for harnesses it cannot support
 
 #### Context
@@ -1022,6 +1353,21 @@ it, and it changed the design:
   asserts that flag "does not suppress it" and tells Control to select an
   option that never appears — while the same cell warns that a bare Enter
   quits the worker. Acting on the stale instruction is actively harmful.
+
+  **This bullet's measurement was withdrawn on 2026-09-11 and is amended here
+  on 2026-09-16.** The probe ran in a git worktree of an already trusted
+  repository, and worktrees inherit Claude Code's trust, so no dialog was ever
+  going to appear. A fresh repository shows the dialog with `No, exit`
+  preselected even with the flag, reproduced on Claude Code 2.1.268. The
+  reasoning that followed from it — that the trust column enumerated a class it
+  could not finish enumerating — still stands on the other cells and is why the
+  column went; the Claude cell was not one of its examples. The 2026-09-11
+  record states the correction, and `harnesses.json` now carries it as the
+  Claude entry's measured note. Amended in place rather than deleted, because
+  the reasoning is still load-bearing and because a reader who finds only the
+  original text acts on a claim that skips the one setup step needing a human.
+  A task-1 implementer in the 0.20.0 delivery did exactly that, reading this
+  bullet and not the correction 600 lines later.
 - Orca's injected worker preamble already requires a short executive summary in
   the message body and a `payload.reportPath` pointing at any long-form
   artifact. The convention this project was about to invent already exists.
