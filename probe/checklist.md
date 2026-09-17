@@ -193,7 +193,13 @@ Use a path that no harness has trusted — a new directory each time, never
 `r1` to `r3` — with a Claude Code pin, and run `dely preflight` inside a Run.
 
 **Pass:** `PREFLIGHT … FAIL` in under 60 s, the printed `last output` contains
-the dialog text, and `orca terminal list` shows nothing left behind.
+at least one line of the dialog, and `orca terminal list` shows nothing left
+behind. One line is enough, and on Claude Code it is often only the tail: Orca's
+prompt delivery presses Enter into the dialog, where `No, exit` is preselected,
+so Claude has exited to a shell before the helper reads the last 400
+characters. On `90fc7a9` the quote held `Security guide`, a line of that
+dialog and one `probe/trust.sh` matches on; `harnesses.json` records the
+mechanism.
 
 The quote is the point, not the verdict. A failure that arrives on time with an
 empty quote tells the human nothing, and that is exactly how this failed before
@@ -229,14 +235,20 @@ Steps and their pass conditions:
 1. Control starts the delivery and dispatches the implementer, which cannot
    acknowledge behind Claude's dialog. From 0.20.0 a delivery does not
    preflight first, so the sequence is `NO_ACK` after `ACK_S` (60 s), then one
-   `dely preflight` that fails the Claude pin. **Pass:** within `ACK_S` plus
-   90 s of the first `dispatch` event, Control has stopped on a message naming
-   the harness, the path, and what the human must do; the log for the Run
-   shows exactly one `no_ack` before the failing `preflight` and **no dispatch
-   after it**; `orca orchestration worker-list` shows every dispatch released;
-   `orca terminal list` has no leftover terminal. On `90fc7a9`, whose skill had
-   lost the `PREFLIGHT … FAIL` route, Control dispatched a second time into the
-   same dialog and stopped about 4 min after the first dispatch.
+   `dely preflight` that fails the Claude pin. The clock starts at the Run's
+   `no_ack` event: a dispatch that never acknowledges writes `no_ack`, not
+   `dispatch`. **Pass:** within 150 s of the `no_ack` event, the log for the
+   Run shows a `preflight` failing the Claude pin and Control has stopped on a
+   message naming the harness, the path, and what the human must do; there is
+   exactly one `no_ack` before that `preflight` and **no `dispatch` after
+   it**; `orca orchestration worker-list` shows every dispatch released;
+   `orca terminal list` has no leftover terminal. Measured on `b8094bf`: 63 s
+   from the dispatch to `no_ack`, 79 s more to the failing `preflight` — a
+   Control turn and a 56 s preflight — and 25 s more to the stop, 104 s from
+   `no_ack`. The 150 s leaves room for a slower Control turn. On `90fc7a9`,
+   whose skill had lost the `PREFLIGHT … FAIL` route, Control dispatched a
+   second time into the same dialog and stopped about 4 min after the first
+   dispatch.
 2. Act as the human: `probe/trust.sh ~/dely-probe/t-<sha>`. It opens Claude in
    an Orca terminal, answers the dialog, verifies
    `projects[<path>].hasTrustDialogAccepted` in `~/.claude.json`, and closes

@@ -238,9 +238,13 @@ of the loop — `trust.sh`, one message, a passing preflight in the same Run,
 `ACCEPT` — passed. The route is restored in result handling and the failure
 table, and a fresh dispatch after `NO_ACK` now depends on every pin passing.
 Checklist row 7's first step, written for 0.19.0's preflight-first flow and
-unable to finish in its 60 s as a result, now bounds the stop by `ACK_S` plus
-90 s from the first dispatch and requires no dispatch after the failing
-preflight.
+unable to finish in its 60 s as a result, now bounds the stop at 150 s from
+the Run's `no_ack` event — the first event a dispatch that never acknowledges
+writes — and requires a `preflight` failing the Claude pin and no `dispatch`
+after it. Measured on `b8094bf`: 63 s from the dispatch to `no_ack`, then 79 s
+to the failing preflight and 25 s to the stop, 104 s from `no_ack`. The bound
+this entry first carried, `ACK_S` plus 90 s from the first `dispatch` event,
+anchored on an event that case never writes and was corrected at re-review.
 
 Rows 1, 3 and 4 were not rerun for this change: their Runs logged no `no_ack`
 and no `preflight` event, so the route never lay on their path, and rows 5 and
