@@ -25,7 +25,7 @@
         "needsImport": true,
         "importLine": "@AGENTS.md"
       },
-      "notes": "worker-start --model pin honoured. The two discovery probes are answered locally (num_turns 0, total_cost_usd 0, no model turn); do not treat them as a dispatch. Trust is a dialog. A fresh repository shows the trust dialog even with --dangerously-skip-permissions, with No, exit preselected, reproduced 2026-09-11 on Claude Code 2.1.268; a worktree of an already-trusted repository inherits trust and shows none, which is what the withdrawn 2026-09-04 probe actually measured — do not re-propose that 2026-09-04 reading."
+      "notes": "worker-start --model pin honoured. The two discovery probes are answered locally (num_turns 0, total_cost_usd 0, no model turn); do not treat them as a dispatch. Trust is a dialog. A fresh repository shows the trust dialog even with --dangerously-skip-permissions, with No, exit preselected, reproduced 2026-09-11 on Claude Code 2.1.268; a worktree of an already-trusted repository inherits trust and shows none, which is what the withdrawn 2026-09-04 probe actually measured — do not re-propose that 2026-09-04 reading. Claude Code 2.1.273 and 2.1.274 word the dialog 'Quick safety check: Is this a project you created or one you trust?' with 'No, exit' preselected, so Enter refuses and exits the harness. Orca's prompt delivery sends Enter into that dialog, which is why a NO_ACK or PREFLIGHT FAIL quote on an untrusted path ends at a shell prompt and may hold only the tail 'Security guide' within the helper's 400-character quote (measured 2026-09-16 and 2026-09-17)."
     },
     {
       "name": "Codex CLI",
@@ -54,7 +54,7 @@
           "CLAUDE.md"
         ]
       },
-      "notes": "Codex CLI 0.154.0 shows its own trust dialog on a fresh directory ('Do you trust the contents of this directory?'), measured 2026-09-16 during the 0.19.0 checklist; trust is dialog, not orca-preflight. Control wakes by waker. Discovery: slugs with visibility hide are not offered; effort levels are supported_reasoning_levels on each slug, not one vocabulary per harness. Native AGENTS.md reader; CLAUDE.md is inert (not imported)."
+      "notes": "Codex CLI 0.154.0 shows its own trust dialog on a fresh directory ('Do you trust the contents of this directory?'), measured 2026-09-16 during the 0.19.0 checklist; trust is dialog, not orca-preflight. Control wakes by waker. Discovery: slugs with visibility hide are not offered; effort levels are supported_reasoning_levels on each slug, not one vocabulary per harness. Native AGENTS.md reader; CLAUDE.md is inert (not imported). '› 1. Yes, continue' is preselected, so Enter grants trust (measured 2026-09-16 on 0.154.0)."
     },
     {
       "name": "Grok Build",
@@ -150,7 +150,7 @@
           "CLAUDE.md"
         ]
       },
-      "notes": "worker-start --model pin honoured; omit --effort (there is no effort flag; write the literal default). worker-start --agent cursor-agent returns agent_unconfigured; the id that resolves is cursor. Offer the model slug before ' - '. Do not invent an effort vocabulary, strip effort suffixes from slugs, or synthesize parameterized [effort=…] forms. Native AGENTS.md reader; the CLI also applies CLAUDE.md as a rule, so that file is not inert, but the import write offer stays on entries with needsImport. Never PATH agent (collides with Grok). Never -w/--worktree. Do not put --trust or an unpinned --sandbox on the launch argv."
+      "notes": "worker-start --model pin honoured; omit --effort (there is no effort flag; write the literal default). worker-start --agent cursor-agent returns agent_unconfigured; the id that resolves is cursor. Offer the model slug before ' - '. Do not invent an effort vocabulary, strip effort suffixes from slugs, or synthesize parameterized [effort=…] forms. Native AGENTS.md reader; the CLI also applies CLAUDE.md as a rule, so that file is not inert, but the import write offer stays on entries with needsImport. Never PATH agent (collides with Grok). Never -w/--worktree. Do not put --trust or an unpinned --sandbox on the launch argv. Trust dialog on a fresh directory, measured 2026-09-16 and 2026-09-17 on Cursor Agent 2026.09.10-fd3934a and 2026.09.15-d2fe57e: '⚠ Workspace Trust Required … Do you trust the contents of this directory?' with '▶ [a] Trust this workspace' preselected over '[q] Quit', so `a` or Enter grants trust, and the screen shows '⏳ Trusting workspace...' before the composer. Text sent in that state was dropped while `orca terminal send` returned ok; wait for the composer before sending a prompt."
     },
     {
       "name": "GitHub Copilot CLI",

@@ -139,11 +139,21 @@ names which rows it skipped. The 0.19.0 release did exactly that — it ran rows
 
 ## Step 4 — row 4, a worker that dies after it acknowledges
 
-Inside one of the rows above, after the implement worker has acknowledged, kill
-its agent process from outside Orca.
+Inside one of the rows above, after the implement worker has acknowledged
+**and** Control's own wait for that Run is running
+(`pgrep -f "dely.js wait --run <run>"` for a background Control, the
+`wait-bg` waiter for a waker one), kill the worker's agent process from outside
+Orca. An acknowledgement is logged a few seconds after launch, but Control may
+not start waiting for another 20 s while it finishes its turn; a kill in that
+window measures Control's turn, not the helper. On `90fc7a9` a kill 4 s after
+the `dispatch` event read 34 s to `ATTENTION`, of which 18 s passed before any
+wait existed.
 
 **Pass:** Control reports `ATTENTION` within 30 s and dispatches the same task
-again exactly once.
+again exactly once. Expect about one `POLL_S` (15 s) plus a round-trip from the
+start of the wait: `wait` blocks in `check --wait` before it reads
+`worker-list`. Measured 16 s from wait start on Orca 1.4.203 and 1.4.204, and
+8 s from a kill 8 s into the wait.
 
 This is the row that catches a helper which prints `DISPATCHED` without ever
 waiting for the acknowledgement: such a helper passes row 1 whenever the worker
@@ -216,10 +226,17 @@ Setup:
 
 Steps and their pass conditions:
 
-1. Control starts the delivery and reaches its first preflight. **Pass:**
-   within 60 s Control has stopped on a message naming the harness, the path,
-   and what the human must do; `orca orchestration worker-list` shows the
-   preflight dispatch released; `orca terminal list` has no leftover terminal.
+1. Control starts the delivery and dispatches the implementer, which cannot
+   acknowledge behind Claude's dialog. From 0.20.0 a delivery does not
+   preflight first, so the sequence is `NO_ACK` after `ACK_S` (60 s), then one
+   `dely preflight` that fails the Claude pin. **Pass:** within `ACK_S` plus
+   90 s of the first `dispatch` event, Control has stopped on a message naming
+   the harness, the path, and what the human must do; the log for the Run
+   shows exactly one `no_ack` before the failing `preflight` and **no dispatch
+   after it**; `orca orchestration worker-list` shows every dispatch released;
+   `orca terminal list` has no leftover terminal. On `90fc7a9`, whose skill had
+   lost the `PREFLIGHT … FAIL` route, Control dispatched a second time into the
+   same dialog and stopped about 4 min after the first dispatch.
 2. Act as the human: `probe/trust.sh ~/dely-probe/t-<sha>`. It opens Claude in
    an Orca terminal, answers the dialog, verifies
    `projects[<path>].hasTrustDialogAccepted` in `~/.claude.json`, and closes

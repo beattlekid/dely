@@ -166,9 +166,16 @@ and `worker-show`, and if the process is gone, `worker-stop`, then
 A second time on the same input goes to the human. An absent `nextAction` is
 absent, not `none` with attention — that row is not `ATTENTION` and the wait
 continues. `STALLED`: read the output, then wait again or recover.
-`NO_ACK`: run setup's `dely preflight`, then one fresh `dely dispatch` with
-the same prompt file; never retry into the same terminal, and never reuse a
-settled terminal; a second failure on the same input goes to the human.
+`NO_ACK`: run setup's `dely preflight` in the same Run. If every pin passes,
+one fresh `dely dispatch` with the same prompt file; never retry into the same
+terminal, and never reuse a settled terminal; a second failure on the same
+input goes to the human. Any `PREFLIGHT … FAIL`: do not dispatch to any
+pin — a failed pin's cause is already known and another dispatch only
+repeats it.
+Stop and relay the printed reason: the harness, the path, and that the human
+opens that harness there once to answer its own dialog; Dely never answers
+it. The failed worker is already stopped and released. When the human says
+it is done, rerun `dely preflight` in the same Run and continue from there.
 `FAILED`: one fresh `dely dispatch` with the same prompt file and the same
 retry limits. `DEADLINE`: a checkpoint — check `worker-list` and the last
 output; if the worker is progressing, wait again; a second `DEADLINE` with
@@ -334,5 +341,6 @@ from an ambiguous, missing, or merely transport-level outcome.
 | Scope or architecture must change | Return to the design gate |
 | New authority or destructive action is required | Ask the human |
 | Orca or a required capability is unavailable | Stop; no headless fallback |
+| any `PREFLIGHT … FAIL` | Dispatch to no pin; relay harness, path and dialog to the human; rerun preflight in the same Run when told |
 | Harness fails or evidence is insufficient | Preserve the candidate, report the native outcome and role disposition |
 | Idempotent release step is interrupted | Verify Git and pull-request state, then resume |

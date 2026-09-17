@@ -117,10 +117,11 @@ usage block is deleted, because `dely` prints its own usage.
 
 The 2026-09-15 review estimated this at about 220 lines, summing a per-section
 budget of 217. Measured after the cut, at the 80-column prose every other file
-in this repository uses, it is **338 lines** — against 445 at baseline, with
-2904 words against 3624 and no prose line over 78. (It was 323 at `698dc28`;
+in this repository uses, it is **346 lines** — against 445 at baseline, with
+3016 words against 3624 and no prose line over 78. (It was 323 at `698dc28`;
 the review remediation added the two `ATTENTION` routes and the `dely log`
-sentence, and the live-verification fix below added the `--control` rule.) The estimate was
+sentence, and the two live-verification fixes below added the `--control` rule
+and restored the `PREFLIGHT … FAIL` route.) The estimate was
 not wrong about what to delete; it undercounted what one section must hold.
 "Orca and the helper" was budgeted 45 lines for the run-create, preflight,
 dispatch, wait and result-handling sequence, and it also has to carry the
@@ -221,6 +222,36 @@ into the review remediation because the release floor let it through: rows 1
 to 3 pass on branch, `ACCEPT` and human count, and none of those can see which
 wait a Control used. Checklist step 3 now requires a waker Control's row to
 show `wait_bg` and `notify` in the log for its Run.
+
+**A failed preflight stops dispatch again.** Also found by live verification,
+of `90fc7a9`. 0.19.0 stated a `PREFLIGHT … FAIL` route twice: do not dispatch
+to any pin, relay the reason, rerun preflight when the human is done. This
+record's cut of `SKILL.md` moved preflight off the delivery path and dropped
+that route with it; what remained was "`NO_ACK`: run setup's `dely preflight`,
+then one fresh `dely dispatch`", with no condition on the preflight. Neither
+the task 2 survival list nor the review of `698dc28` named it. In checklist
+row 7 on Orca 1.4.204 a Cursor Control did exactly what the text said: `NO_ACK`
+after 63 s, preflight failing the Claude pin on its trust dialog, then a second
+dispatch into the same dialog and a second `NO_ACK` 63 s later, before
+stopping. It still named the harness, the path and the action, and the rest
+of the loop — `trust.sh`, one message, a passing preflight in the same Run,
+`ACCEPT` — passed. The route is restored in result handling and the failure
+table, and a fresh dispatch after `NO_ACK` now depends on every pin passing.
+Checklist row 7's first step, written for 0.19.0's preflight-first flow and
+unable to finish in its 60 s as a result, now bounds the stop by `ACK_S` plus
+90 s from the first dispatch and requires no dispatch after the failing
+preflight.
+
+Rows 1, 3 and 4 were not rerun for this change: their Runs logged no `no_ack`
+and no `preflight` event, so the route never lay on their path, and rows 5 and
+6 exercise only the helper, which this change does not touch. Rows 2 and 7 run
+on the commit that carries it.
+
+One Minor finding is recorded and deliberately not fixed. `preflight`'s printed
+and logged `seconds` start after `worker-start` returns, so they omit the launch
+— 15 logged against 56 s of wall time for an untrusted Claude pin. The placement
+is inherited from 0.19.0; moving it changes the helper and would reopen rows 5
+and 6.
 
 #### Alternatives considered
 
