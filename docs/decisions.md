@@ -2786,3 +2786,63 @@ a record ambiguous. Add locking only after an observed concurrent append corrupt
 short record. Add rotation only after file growth causes a maintenance problem. A public
 schema or reader requires a separate approved use case; ordinary maintenance reading by
 a person or agent does not trigger one.
+
+## Ship compact worker inspection through the existing cross-platform helper
+
+### Context
+
+Coordinator recovery occasionally needs `orca orchestration worker-list`, whose full
+rows contain substantially more state than the routing decision consumes. Project
+instructions can ask a Control to filter that JSON locally, but prose alone neither
+provides a reusable command nor proves that large, unrelated fields are omitted. The
+runtime already has a Node 18 helper and already reads the same worker-list projection
+inside `wait`; an earlier decision rejected Bash plus PowerShell twins because they
+drift and neither shell is universal across Dely's supported hosts.
+
+### Decision
+
+Dely exposes `dely workers --run <run-id>` through the existing Node helper. It invokes
+Orca's run-scoped worker-list itself and emits only coordinator-routing identity,
+dispatch/terminal state, liveness, attention, and next-action fields. Optional Orca
+fields remain optional: in particular, an absent `nextAction` is not synthesized as
+`none`. An Orca failure or malformed worker-list response is a visible non-zero error,
+not an empty successful result.
+
+The command is shipped with the plugin rather than installed as a separate global
+program. The delivery and setup skills teach Controls when and how to use the compact
+view, and the README explains that plugin installation supplies the helper and how to
+invoke it. A deterministic probe substitutes a fake Orca executable to discriminate
+filtered output, optional-field semantics, and fail-closed behaviour without requiring
+a live worker.
+
+### Alternatives considered
+
+- Document a PowerShell `ConvertFrom-Json` pipeline and a Bash `jq` pipeline. Rejected
+  because the two paths drift and each excludes supported hosts.
+- Print the full Orca row and rely on the caller to select fields. Rejected because it
+  does not reduce coordinator context and cannot enforce the promised output boundary.
+- Install a global `dely` executable or mutate `PATH`. Rejected because plugin managers
+  already distribute the helper, installation locations differ by harness, and setup
+  must not silently change user-machine authority.
+- Hide worker-list inspection completely inside `wait`. Rejected because deadline and
+  recovery checkpoints still require an explicit operator-readable fleet view.
+
+### Consequences
+
+Controls gain a deterministic, low-context inspection surface with one implementation
+on Windows, macOS, and Linux. The compact schema becomes a documented helper contract
+and therefore needs compatibility-minded changes. It cannot replace worker transcripts,
+`worker-show`, or Orca's full rows when investigating a contradiction; it only covers
+the first routing check.
+
+### Non-goals
+
+No polling loop, automatic recovery action, process-liveness inference, transcript
+summarisation, remote-worker enumeration by default, global installation, shell alias,
+or replacement for Orca's authoritative lifecycle records.
+
+### Deferred
+
+Add alternate output formats only after a real consumer cannot use the compact JSON.
+Add remote enumeration only after a supervised workflow demonstrates that run-scoped
+inspection is insufficient and defines its authority boundary.
