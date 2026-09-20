@@ -52,10 +52,12 @@ Branch, base, remote, and pull-request target:
 `feat/hybrid-manual-worker-rules`, based on `origin/main`, pushed to `origin`, with a
 draft pull request targeting `main`.
 
-Resolved phase pins after the approved replan: implementation uses Antigravity CLI,
-`gemini-3.1-pro-high`, effort `default`; review uses Claude Code, model `opus`, effort
-`medium`. Live discovery on 2026-09-20 found `agy`, `claude`, and `codex`; it did not find
-`cursor-agent`.
+Resolved phase pins after the approved replans: implementation uses Antigravity CLI,
+`gemini-3.1-pro-high`, effort `default`; review also uses a fresh Antigravity CLI session
+but model `claude-opus-4-6-thinking`, effort `default`. Live discovery on 2026-09-20
+found both exact AGY model ids plus the `agy` and `codex` binaries; it did not find
+`cursor-agent`. The locally installed `claude` binary has no usable account and is not a
+delivery phase.
 
 Authority: this plan may commit only its owned paths, run gates, push the named branch,
 and open or update its draft pull request. It may not merge, force-push, stash, reset,
