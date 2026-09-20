@@ -64,6 +64,10 @@ deferred harnesses — live in `harnesses.json` at the repository root.
 This project adds no phase-implied sandbox. Native Internet access, closure
 gates, result writes and coordinator completion stay available.
 
+## Optional project overlay: hybrid manual worker mode
+
+Projects may explicitly opt into [`docs/hybrid-manual-worker-mode.md`](docs/hybrid-manual-worker-mode.md) while Orca lacks reliable `worker-start` support for a required harness. The overlay uses human-opened worker terminals and Control-driven `terminal send`, `wait`, and `read`; it does not change the portable Dely delivery contract or authorize trust-dialog automation. Remove the overlay when the harness is supported natively.
+
 ## Closure gates
 
 Run from the repository root:
