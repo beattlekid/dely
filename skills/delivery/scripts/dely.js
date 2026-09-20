@@ -103,7 +103,7 @@ function pin(repo, phase) {
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const USAGE =
-  "usage: dely preflight|dispatch|wait|wait-bg|notify | log --run ID --json OBJ";
+  "usage: dely preflight|dispatch|wait|wait-bg|notify|workers | log --run ID --json OBJ";
 const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
@@ -678,8 +678,30 @@ function logCmd(f) {
   process.exit(0);
 }
 
+function workersCmd(f) {
+  const r = orca(["orchestration", "worker-list", "--run", f.run]);
+  if (r.ok === false || !r.result || !Array.isArray(r.result.workers)) {
+    process.exit(1);
+  }
+  const compact = r.result.workers.map((w) => {
+    const out = {};
+    if (w.dispatchId !== undefined) out.dispatchId = w.dispatchId;
+    if (w.agentIdentity !== undefined) out.agentIdentity = w.agentIdentity;
+    if (w.runId !== undefined) out.runId = w.runId;
+    if (w.dispatchStatus !== undefined) out.dispatchStatus = w.dispatchStatus;
+    if (w.terminalState !== undefined) out.terminalState = w.terminalState;
+    if (w.projection) {
+      if (w.projection.liveness !== undefined) out.liveness = w.projection.liveness;
+      if (w.projection.attention !== undefined) out.attention = w.projection.attention;
+      if (w.projection.nextAction !== undefined) out.nextAction = w.projection.nextAction;
+    }
+    return out;
+  });
+  console.log(JSON.stringify(compact, null, 2));
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
-const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd };
+const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd, workers: workersCmd };
 const need = {
   preflight: ["repo", "run"],
   dispatch: ["repo", "run", "phase", "spec-file"],
@@ -687,6 +709,7 @@ const need = {
   "wait-bg": ["run", "control"],
   notify: ["run", "out"],
   log: ["run", "json"],
+  workers: ["run"],
 };
 if (!cmd) {
   printIdentity();
