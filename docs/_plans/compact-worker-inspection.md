@@ -3,7 +3,7 @@
 Decision record: `docs/decisions.md` under “Ship compact worker inspection through the
 existing cross-platform helper”.
 
-**Baseline:**
+**Baseline:** `3b7e36b96a82fbe112a73775d43398893b460f05`
 
 ## Goal
 
