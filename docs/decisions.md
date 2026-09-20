@@ -2808,6 +2808,16 @@ fields remain optional: in particular, an absent `nextAction` is not synthesized
 `none`. An Orca failure or malformed worker-list response is a visible non-zero error,
 not an empty successful result.
 
+Deployment resolution uses a live local inventory rather than assuming the phase table
+is still executable. `dely inventory --repo <path>` forces a manual discovery refresh;
+setup and dispatch use the same inventory in automatic mode, refreshing it when its
+machine-local cache is at least 24 hours old. The inventory records the exact agent id,
+binary, launch flags, discovered model slugs, effort surface, and observation time. A
+configured binary or model that is absent from current discovery fails before
+`worker-start` and prints the valid current choices. Dely does not silently substitute a
+different implementer or reviewer, because that would change an approved execution
+envelope without authority.
+
 The command is shipped with the plugin rather than installed as a separate global
 program. The delivery and setup skills teach Controls when and how to use the compact
 view, and the README explains that plugin installation supplies the helper and how to
@@ -2826,6 +2836,13 @@ a live worker.
   must not silently change user-machine authority.
 - Hide worker-list inspection completely inside `wait`. Rejected because deadline and
   recovery checkpoints still require an explicit operator-readable fleet view.
+- Keep phase rows authoritative even when their binary or model vanished. Rejected
+  because the observed Cursor pin passed static parsing and then failed at agent
+  readiness: `cursor-agent` was not installed while AGY, Claude, and Codex were present.
+- Automatically replace a missing pin with the first installed harness. Rejected
+  because ordering is not a role policy and can destroy review independence or spend an
+  unapproved model quota. Automatic refresh updates evidence; replacement remains an
+  explicit setup/replan choice.
 
 ### Consequences
 
@@ -2835,11 +2852,19 @@ and therefore needs compatibility-minded changes. It cannot replace worker trans
 `worker-show`, or Orca's full rows when investigating a contradiction; it only covers
 the first routing check.
 
+Setup and dispatch stop earlier on stale deployment choices, while a forced inventory
+command makes agent/model/command discovery reproducible without an LLM turn. The cache
+is derived machine-local data and may be deleted safely; a refresh failure never turns
+old evidence into a current success. Automatic refresh is demand-driven on setup or
+dispatch, so it does not install an operating-system scheduler or consume daily agent
+inference quota while the project is idle.
+
 ### Non-goals
 
 No polling loop, automatic recovery action, process-liveness inference, transcript
 summarisation, remote-worker enumeration by default, global installation, shell alias,
-or replacement for Orca's authoritative lifecycle records.
+silent role substitution, background agent automation, or replacement for Orca's
+authoritative lifecycle records.
 
 ### Deferred
 

@@ -1,4 +1,4 @@
-# Plan — compact, setup-documented worker inspection
+# Plan — compact worker inspection and live deployment inventory
 
 Decision record: `docs/decisions.md` under “Ship compact worker inspection through the
 existing cross-platform helper”.
@@ -8,19 +8,22 @@ existing cross-platform helper”.
 ## Goal
 
 The bundled Dely helper provides a cross-platform, run-scoped command that reduces a
-full Orca worker-list response to the fields a coordinator routes on, fails visibly
-when that evidence cannot be trusted, and is discoverable through both setup guidance
-and installation documentation. This plan does not automate recovery or install a
-global executable.
+full Orca worker-list response to routing fields and a live inventory that validates
+agent, model, effort, and launch-command availability before dispatch. Setup and
+dispatch refresh derived inventory evidence at most daily on demand, while a manual
+command forces refresh. This plan does not silently substitute roles, automate recovery,
+or install a global executable.
 
 ## Allowed scope
 
 ```text
 skills/delivery/scripts/dely.js
 probe/workers-filter.js
+probe/inventory-refresh.js
 skills/delivery/SKILL.md
 skills/setup/SKILL.md
 README.md
+harnesses.json
 docs/decisions.md
 docs/_plans/compact-worker-inspection.md
 .claude-plugin/plugin.json
@@ -28,18 +31,18 @@ docs/_plans/compact-worker-inspection.md
 AGENTS.md
 ```
 
-`rg --files` enumerated the runtime, both owning skills, the installation document,
-the probe surface, the two versioned manifests, and the repository gate owner. There is
-no colocated test directory or package registry file; the focused probe is added under
-the existing `probe/` surface. The durable decision is carried because it owns the new
-public helper contract; this transient plan is deleted before release-binding review.
+`rg --files` enumerated the runtime, harness registry, both owning skills, installation
+document, probe surface, two versioned manifests, and repository gate owner. There is no
+colocated test directory or package registry file; focused probes are added under the
+existing `probe/` surface. The durable decision is carried because it owns the new public
+helper contracts; this transient plan is deleted before release-binding review.
 
 ## Forbidden scope
 
-`harnesses.json`, `.cursor-plugin/plugin.json`, Orca configuration, user PATH, and all
-plugin caches are excluded: the command changes neither harness discovery nor the
-unversioned Cursor manifest and does not mutate installations during development.
-Existing dispatch, wait, release, and worker lifecycle semantics are unchanged.
+`.cursor-plugin/plugin.json`, Orca configuration, user PATH, operating-system scheduler,
+and plugin caches are excluded. The unversioned Cursor manifest is unchanged and the
+candidate does not mutate installed harnesses. Existing wait, release, and worker
+lifecycle semantics are unchanged.
 
 ## Execution envelope
 
@@ -49,9 +52,10 @@ Branch, base, remote, and pull-request target:
 `feat/hybrid-manual-worker-rules`, based on `origin/main`, pushed to `origin`, with a
 draft pull request targeting `main`.
 
-Resolved phase pins: implementation uses Cursor Agent CLI,
-`cursor-grok-4.6-high`, effort `default`; review uses Claude Code,
-`claude-opus-5`, effort `medium`.
+Resolved phase pins after the approved replan: implementation uses Antigravity CLI,
+`gemini-3.1-pro-high`, effort `default`; review uses Claude Code, model `opus`, effort
+`medium`. Live discovery on 2026-09-20 found `agy`, `claude`, and `codex`; it did not find
+`cursor-agent`.
 
 Authority: this plan may commit only its owned paths, run gates, push the named branch,
 and open or update its draft pull request. It may not merge, force-push, stash, reset,
@@ -76,26 +80,48 @@ sentinel data survives, optional absence becomes `none`, or errors become `[]`.
 
 **Document impact.** None in this task; the next task owns user and Control guidance.
 
-### 2. Setup and delivery teach the bundled helper
+### 2. Live deployment inventory rejects stale pins before launch
+
+**Behaviour.** `dely inventory --repo <path>` forces current binary/model/command
+discovery. Automatic setup/dispatch inventory refresh reuses evidence younger than 24
+hours and refreshes stale evidence without an LLM turn. A missing configured binary or
+model fails before worker launch and lists valid current choices; it never silently
+changes phase ownership.
+
+**Direction.** Extend the same Node helper and add a fake-command probe covering fresh
+cache, stale cache, forced refresh, missing binary/model, exact model slugs, and a failed
+discovery command. Keep cache data derived and machine-local.
+
+**Files.** `skills/delivery/scripts/dely.js`, `probe/inventory-refresh.js`,
+`harnesses.json`, `AGENTS.md`.
+
+**Focused verification.** `node probe/inventory-refresh.js` rejects stale evidence
+presented as current, silent fallback from an unavailable pin, and lossy AGY model slug
+parsing. `jq -e . harnesses.json` validates the registry shape.
+
+**Document impact.** `harnesses.json` owns verified launch/discovery facts; `AGENTS.md`
+owns this repository's live phase choices and version gate.
+
+### 3. Setup and delivery teach both bundled helper surfaces
 
 **Behaviour.** Installation docs say the helper ships with the plugin, setup guidance
-teaches the exact compact command without installing or trusting anything new, and the
-delivery workflow routes first-line worker-list inspection through it while retaining
-full Orca inspection for contradictions.
+teaches the exact compact and inventory commands without installing or trusting anything
+new, and delivery routes first-line worker-list inspection plus pre-dispatch availability
+checks through them while retaining full Orca inspection for contradictions.
 
 **Direction.** Reconcile the two owning skills and README. Do not add another managed
 AGENTS block field or promise global PATH availability.
 
 **Files.** `skills/delivery/SKILL.md`, `skills/setup/SKILL.md`, `README.md`.
 
-**Focused verification.** A repository grep must find the exact `dely workers --run`
-contract in all three owners and the README must state that no separate helper install
-is required.
+**Focused verification.** A repository grep must find exact `dely workers --run` and
+`dely inventory --repo` contracts in all three owners, including automatic 24-hour and
+manual force-refresh guidance; README must state no separate helper install is required.
 
 **Document impact.** These three files are the owning workflow, setup, and installation
 documents; `docs/decisions.md` already records the durable rationale.
 
-### 3. Release metadata and repository gates identify the new skill version
+### 4. Release metadata and repository gates identify the new skill version
 
 **Behaviour.** Both versioned manifests and the literal repository version gate agree
 on `0.21.0`; the transient plan is removed before release review.
@@ -118,20 +144,23 @@ version.
 | --- | --- | --- | --- |
 | Compact output contains only routing evidence | `node probe/workers-filter.js` | A valid command prints the full Orca row including a sentinel transcript/metadata field | Pending implementation |
 | Optional and error semantics remain trustworthy | `node probe/workers-filter.js` | Missing `nextAction` is emitted as `none`, or an Orca/malformed response succeeds as an empty list | Pending implementation |
-| Setup and install guidance own the command | exact repository grep across the two skills and README | README mentions the command but setup never teaches it, so a configured project cannot discover the workflow | Pending implementation |
+| Automatic and manual inventory use current executable evidence | `node probe/inventory-refresh.js` | A stale cache or vanished binary/model is accepted, or AGY slugs are shortened/invented | Pending implementation |
+| Missing pins never silently change role ownership | `node probe/inventory-refresh.js` | Cursor is absent and dispatch automatically selects another harness instead of returning current choices | Pending implementation |
+| Setup and install guidance own both commands | exact repository grep across the two skills and README | README mentions commands but setup never teaches daily/manual refresh, so a configured project cannot discover the workflow | Pending implementation |
 | Versioned skill release is coherent | manifest JSON gate plus literal `0.21.0` assertions | Runtime/skills change while either versioned manifest remains `0.20.0` | Pending implementation |
 
-**Cannot be observed:** the fake-Orca probe does not prove compatibility with a future
-Orca schema or a live remote worker; documentation grep does not prove a particular
-plugin manager's cache refreshed. The existing live release probe remains the boundary
-for installed-plugin behaviour.
+**Cannot be observed:** fake command probes do not prove compatibility with a future
+Orca schema, proprietary CLI output change, or live remote worker; documentation grep
+does not prove a particular plugin manager's cache refreshed. The existing live release
+probe remains the boundary for installed-plugin behaviour.
 
 ## Stop conditions
 
 Return `NEEDS_REPLAN` if a useful compact projection requires fields outside the
-approved schema, if Orca cannot be substituted deterministically through the existing
-CLI seam, if setup would need to mutate global PATH/plugin caches, or if preserving
-missing optional fields conflicts with an existing public helper contract.
+approved schema, discovery cannot be substituted deterministically through the existing
+process seam, current CLI output cannot be parsed without a maintained static model
+catalog, setup would need to mutate global PATH/plugin caches, or preserving missing
+optional fields conflicts with an existing public helper contract.
 
 ## Closure gates
 
@@ -139,6 +168,7 @@ Run from `D:\WorkSpace\dely`:
 
 ```bash
 node probe/workers-filter.js
+node probe/inventory-refresh.js
 git diff --check
 jq -e . harnesses.json plugin.json .claude-plugin/plugin.json .claude-plugin/marketplace.json .codex-plugin/plugin.json .cursor-plugin/plugin.json >/dev/null
 node --check skills/delivery/scripts/dely.js
