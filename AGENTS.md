@@ -51,8 +51,8 @@ delivery run.
 
 | Phase | Harness | Model | Effort |
 | --- | --- | --- | --- |
-| `implement` | Antigravity CLI | gemini-3.1-pro-high / flash-3.8-high | default |
-| `review` | Antigravity CLI | opus-4.6 (fallback: Cline manual) | medium |
+| `implement` | Antigravity CLI | gemini-3.1-pro-high / gemini-3.8-flash-high | default |
+| `review` | Antigravity CLI | claude-opus-4-6-thinking (fallback: Cline manual) | medium |
 <!-- dely:end -->
 
 The table is this repository's deployment selection, not the portable
