@@ -14,7 +14,13 @@ The project chooses harnesses and models by task complexity. Prefer a fast model
 
 ## Dispatch contract
 
-Control must never launch worker processes headlessly or invisibly in the background. Instead, Control must explicitly create a visible terminal tab in the UI for the human using `orca terminal create --command "<agent_cmd>" --title "<agent_name>" --focus`.
+Control must never launch worker processes headlessly or invisibly in the background. Instead, Control must explicitly create a visible terminal tab in the UI for the human using `orca terminal create --focus`.
+
+**Explicit Command Formulas:**
+- **Antigravity CLI (Implement/Review):** `orca terminal create --command "agy --model <model-id> --dangerously-skip-permissions" --title "AGY Worker" --focus`
+  - *(Example: `agy --model gemini-3.1-pro-high --dangerously-skip-permissions`)*
+  - *(Example: `agy --model claude-opus-4-6-thinking --dangerously-skip-permissions`)*
+- **Cline (Review Fallback):** `orca terminal create --command "cline --auto-approve true" --title "Cline Reviewer" --focus`
 
 Until the harness is supported by Orca `worker-start`, Control orchestrates the manual terminal:
 
