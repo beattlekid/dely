@@ -2,7 +2,7 @@
 
 This repository contains the `dely` package: the `delivery` skill and its
 automation-first control protocol for coding agents, supported today on
-Claude Code, Codex CLI, and Cursor Agent CLI.
+Antigravity CLI and Codex CLI.
 
 ## Source of truth
 
@@ -51,8 +51,8 @@ delivery run.
 
 | Phase | Harness | Model | Effort |
 | --- | --- | --- | --- |
-| `implement` | Cursor Agent CLI | cursor-grok-4.6-high | default |
-| `review` | Claude Code | claude-opus-5 | medium |
+| `implement` | Antigravity CLI | gemini-3.1-pro-high | default |
+| `review` | Antigravity CLI | gemini-3.1-pro-high | medium |
 <!-- dely:end -->
 
 The table is this repository's deployment selection, not the portable

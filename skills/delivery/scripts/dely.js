@@ -92,18 +92,39 @@ function harnessById(id) {
 }
 
 function pin(repo, phase) {
-  const md = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
-  const row = md.split("\n").find((l) => new RegExp("^\\|\\s*`?" + phase + "`?\\s*\\|").test(l));
-  if (!row) throw new Error("no " + phase + " pin in AGENTS.md");
-  const [, harness, model, effort] = row.split("|").slice(1).map((c) => c.trim().replace(/`/g, ""));
-  const h = loadHarnesses().find((x) => x.name === harness);
+  let userConfig = {};
+  try {
+    const cfgPath = path.join(os.homedir(), ".dely", "config.json");
+    if (fs.existsSync(cfgPath)) {
+      userConfig = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  let harness, model, effort;
+  if (userConfig[phase] && userConfig[phase].harness) {
+    harness = userConfig[phase].harness;
+    model = userConfig[phase].model;
+    effort = userConfig[phase].effort;
+  } else {
+    const md = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
+    const row = md.split("\n").find((l) => new RegExp("^\\|\\s*`?" + phase + "`?\\s*\\|").test(l));
+    if (!row) throw new Error("no " + phase + " pin in AGENTS.md");
+    const parts = row.split("|").slice(1).map((c) => c.trim().replace(/`/g, ""));
+    harness = parts[0];
+    model = parts[1];
+    effort = parts[2];
+  }
+
+  const h = loadHarnesses().find((x) => x.name === harness || x.id === harness);
   if (!h) throw new Error("unknown harness " + harness);
   return { phase, agent: h.id, model, effort, modelFlag: h.modelFlag, effortFlag: h.effortFlag };
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const USAGE =
-  "usage: dely preflight|dispatch|wait|wait-bg|notify|workers | log --run ID --json OBJ";
+  "usage: dely init|preflight|dispatch|wait|wait-bg|notify|workers | log --run ID --json OBJ";
 const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
@@ -701,6 +722,12 @@ function workersCmd(f) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
+if (cmd === "init") {
+  const child_process = require("child_process");
+  child_process.execFileSync(process.execPath, [path.join(__dirname, "setup.js")], { stdio: "inherit" });
+  process.exit(0);
+}
+
 const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd, workers: workersCmd };
 const need = {
   preflight: ["repo", "run"],
