@@ -112,9 +112,9 @@ function pin(repo, phase) {
     const row = md.split("\n").find((l) => new RegExp("^\\|\\s*`?" + phase + "`?\\s*\\|").test(l));
     if (!row) throw new Error("no " + phase + " pin in AGENTS.md");
     const parts = row.split("|").slice(1).map((c) => c.trim().replace(/`/g, ""));
-    harness = parts[0];
-    model = parts[1];
-    effort = parts[2];
+    harness = parts[1];
+    model = parts[2];
+    effort = parts[3];
   }
 
   const h = loadHarnesses().find((x) => x.name === harness || x.id === harness);
@@ -124,7 +124,7 @@ function pin(repo, phase) {
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const USAGE =
-  "usage: dely init|preflight|dispatch|wait|wait-bg|notify|workers | log --run ID --json OBJ";
+  "usage: dely init|preflight|dispatch|wait|wait-bg|notify|workers|hello | log --run ID --json OBJ";
 const out = (line, code) => {
   console.log(typeof line === "string" ? line : JSON.stringify(line));
   if (code != null) process.exit(code);
@@ -721,6 +721,10 @@ function workersCmd(f) {
   console.log(JSON.stringify(compact, null, 2));
 }
 
+function hello() {
+  out("Hello from Dely Protocol!", 0);
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === "init") {
   const child_process = require("child_process");
@@ -728,7 +732,7 @@ if (cmd === "init") {
   process.exit(0);
 }
 
-const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd, workers: workersCmd };
+const table = { preflight, dispatch, wait, "wait-bg": waitBg, notify, log: logCmd, workers: workersCmd, hello };
 const need = {
   preflight: ["repo", "run"],
   dispatch: ["repo", "run", "phase", "spec-file"],
@@ -737,6 +741,7 @@ const need = {
   notify: ["run", "out"],
   log: ["run", "json"],
   workers: ["run"],
+  hello: [],
 };
 if (!cmd) {
   printIdentity();
