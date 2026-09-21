@@ -51,8 +51,8 @@ delivery run.
 
 | Phase | Harness | Model | Effort |
 | --- | --- | --- | --- |
-| `implement` | Cursor Agent CLI | cursor-grok-4.6-high | default |
-| `review` | Claude Code | claude-opus-5 | medium |
+| `implement` | Antigravity CLI | gemini-3.1-pro-high | default |
+| `review` | Antigravity CLI | gemini-3.8-flash-high | default |
 <!-- dely:end -->
 
 The table is this repository's deployment selection, not the portable
@@ -86,8 +86,8 @@ git ls-files -z '*.sh' 'skills/delivery/scripts/dely' | xargs -0 -n1 bash -n
 ```
 
 ```bash
-test "$(jq -r .version .claude-plugin/plugin.json)" = 0.20.0
-test "$(jq -r .version .codex-plugin/plugin.json)" = 0.20.0
+test "$(jq -r .version .claude-plugin/plugin.json)" = 0.21.2
+test "$(jq -r .version .codex-plugin/plugin.json)" = 0.21.2
 ```
 
 ```bash

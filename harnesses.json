@@ -81,12 +81,15 @@
       "name": "Antigravity CLI",
       "id": "antigravity",
       "binary": "agy",
-      "status": "deferred",
+      "status": "supported",
       "controlWake": "waker",
       "trust": "dialog",
-      "discovery": null,
-      "modelFlag": false,
-      "effortFlag": false,
+      "discovery": {
+        "models": "agy models",
+        "effort": "agy --help"
+      },
+      "modelFlag": true,
+      "effortFlag": true,
       "permissionDefault": "--dangerously-skip-permissions",
       "forbiddenHeadless": [
         "agy -p",
