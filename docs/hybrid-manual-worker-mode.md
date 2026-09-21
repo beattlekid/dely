@@ -27,7 +27,8 @@ Until the harness is supported by Orca `worker-start`, Control orchestrates the 
 1. Create the terminal session using `orca terminal create`.
 2. Wait for the terminal to initialize and prompt for input.
 3. Send one complete prompt with role, objective, worktree, owned paths, approved context, acceptance criteria, counterexample, verification commands, and handoff format.
-4. Wait with a long terminal wait; do not poll in a tight loop.
+   - *Optimization:* Control's prompt must instruct the manual worker (e.g. Cline) to run a push-notification command upon completion (e.g. `node skills/delivery/scripts/dely.js notify --run <run-id> --out <handoff-file>`) to reactively wake up Control without polling.
+4. Sleep and wait for the reactive notification or check the handoff file.
 5. Read the result and record the evidence.
 6. Use an exact retry request identifier only when Orca reports an ambiguous send.
 
