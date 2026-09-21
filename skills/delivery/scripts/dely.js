@@ -620,31 +620,33 @@ function waitBg(f) {
     .filter((k) => f[k] && f[k] !== true)
     .map((k) => " --" + k + " " + q(f[k]))
     .join("");
-  const cmd =
-    "DELY_WAITER=1 " +
-    bin +
-    " " +
-    self +
-    " wait --run " +
-    q(f.run) +
-    " --as " +
-    q(me) +
-    extra +
-    " > " +
-    q(file) +
-    " 2>&1; rm -f " +
-    q(lock) +
-    "; " +
-    bin +
-    " " +
-    self +
-    " notify --run " +
-    q(f.run) +
-    " --as " +
-    q(me) +
-    " --out " +
-    q(file) +
-    "; exit";
+  const isWin = process.platform === "win32";
+  const cmd = isWin
+    ? `$env:DELY_WAITER="1"; & ${bin} ${self} wait --run ${q(f.run)} --as ${q(me)}${extra} > ${q(file)} 2>&1; Remove-Item -Force ${q(lock)} -ErrorAction SilentlyContinue; & ${bin} ${self} notify --run ${q(f.run)} --as ${q(me)} --out ${q(file)}; exit`
+    : "DELY_WAITER=1 " +
+      bin +
+      " " +
+      self +
+      " wait --run " +
+      q(f.run) +
+      " --as " +
+      q(me) +
+      extra +
+      " > " +
+      q(file) +
+      " 2>&1; rm -f " +
+      q(lock) +
+      "; " +
+      bin +
+      " " +
+      self +
+      " notify --run " +
+      q(f.run) +
+      " --as " +
+      q(me) +
+      " --out " +
+      q(file) +
+      "; exit";
   const r = orca(["terminal", "create", "--worktree", "path:" + process.cwd(), "--title", "dely-wait", "--command", cmd]);
   if (r.ok === false) {
     try {
