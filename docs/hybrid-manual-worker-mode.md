@@ -14,13 +14,16 @@ The project chooses harnesses and models by task complexity. Prefer a fast model
 
 ## Dispatch contract
 
-The human opens and trusts the worker terminals. Control does not create or close those manual terminals. Until the harness is supported by Orca `worker-start`, Control uses the terminal operations exposed by Orca:
+Control must never launch worker processes headlessly or invisibly in the background. Instead, Control must explicitly create a visible terminal tab in the UI for the human using `orca terminal create --command "<agent_cmd>" --title "<agent_name>" --focus`.
 
-1. Read the target terminal and verify its composer/idle state.
-2. Send one complete prompt with role, objective, worktree, owned paths, approved context, acceptance criteria, counterexample, verification commands, and handoff format.
-3. Wait with a long terminal wait; do not poll in a tight loop.
-4. Read the result and record the evidence.
-5. Use an exact retry request identifier only when Orca reports an ambiguous send.
+Until the harness is supported by Orca `worker-start`, Control orchestrates the manual terminal:
+
+1. Create the terminal session using `orca terminal create`.
+2. Wait for the terminal to initialize and prompt for input.
+3. Send one complete prompt with role, objective, worktree, owned paths, approved context, acceptance criteria, counterexample, verification commands, and handoff format.
+4. Wait with a long terminal wait; do not poll in a tight loop.
+5. Read the result and record the evidence.
+6. Use an exact retry request identifier only when Orca reports an ambiguous send.
 
 Workspace trust remains a human security gate. Permission flags such as `--dangerously-skip-permissions` do not authorize Control to answer trust dialogs. Manual workers do not create or close other terminals and do not expand scope.
 
