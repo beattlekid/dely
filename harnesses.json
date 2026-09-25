@@ -89,7 +89,7 @@
         "effort": "agy --help"
       },
       "modelFlag": true,
-      "effortFlag": true,
+      "effortFlag": false,
       "permissionDefault": "--dangerously-skip-permissions",
       "forbiddenHeadless": [
         "agy -p",
